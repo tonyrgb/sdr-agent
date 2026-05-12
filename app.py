@@ -523,7 +523,6 @@ scheduler.add_job(
 app = FastAPI(title="Virtual SDR Agent", docs_url=None, redoc_url=None)
 
 # Session middleware must be added before CORS
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=60 * 60 * 12)  # 12h
 
 app.add_middleware(
     CORSMiddleware,
@@ -533,6 +532,7 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=60 * 60 * 12)
 
 
 # ---------------------------------------------------------------------------

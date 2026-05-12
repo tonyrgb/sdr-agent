@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign In — Virtual SDR Agent</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --brand: #0ea5e9; }
+    body {
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: 'Inter', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .login-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 14px;
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.5);
+    }
+
+    input[type="password"] {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: #e2e8f0;
+      border-radius: 8px;
+      padding: 11px 14px;
+      font-size: 15px;
+      transition: border-color .15s;
+      outline: none;
+    }
+    input[type="password"]:focus {
+      border-color: var(--brand);
+      box-shadow: 0 0 0 2px rgba(14,165,233,.15);
+    }
+
+    .submit-btn {
+      width: 100%;
+      background: var(--brand);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s, transform .1s;
+    }
+    .submit-btn:hover { background: #0284c7; transform: translateY(-1px); }
+    .submit-btn:active { transform: translateY(0); }
+
+    .error-box {
+      background: #1c0a0a;
+      border: 1px solid #7f1d1d;
+      border-radius: 7px;
+      padding: 10px 14px;
+      color: #fca5a5;
+      font-size: 13px;
+      margin-bottom: 18px;
+      display: none;
+    }
+    .error-box.visible { display: block; }
+
+    /* Background grid pattern */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: linear-gradient(rgba(14,165,233,.03) 1px, transparent 1px),
+                        linear-gradient(90deg, rgba(14,165,233,.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <!-- Logo / brand -->
+    <div class="flex items-center gap-3 mb-8">
+      <div style="background:var(--brand);width:8px;height:36px;border-radius:4px;flex-shrink:0;"></div>
+      <div>
+        <div class="text-white font-bold text-xl leading-none">SDR Agent</div>
+        <div class="text-slate-500 text-sm mt-0.5">Prius Intelli</div>
+      </div>
+    </div>
+
+    <h1 class="text-white font-semibold text-lg mb-1">Sign in</h1>
+    <p class="text-slate-500 text-sm mb-6">Enter your password to access the pipeline.</p>
+
+    <!-- Error message (shown via JS or server header) -->
+    <div class="error-box" id="error-box">
+      Incorrect password. Please try again.
+    </div>
+
+    <form method="POST" action="/login" id="login-form">
+      <div class="mb-4">
+        <label class="block text-sm text-slate-400 mb-2 font-medium" for="password">Password</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          placeholder="Enter password"
+          autocomplete="current-password"
+          autofocus
+          required
+        />
+      </div>
+
+      <button type="submit" class="submit-btn mt-2" id="submit-btn">
+        Sign in
+      </button>
+    </form>
+
+    <p class="text-xs text-slate-600 text-center mt-6">
+      Automated Sales Pipeline · Prius Intelli
+    </p>
+  </div>
+
+  <script>
+    // Show error if server returned 401
+    if (document.referrer.includes('/login') || window.location.search.includes('error')) {
+      document.getElementById('error-box').classList.add('visible');
+    }
+
+    // Also check if the page was loaded after a failed POST
+    // (Server sends 401 status with same page — browser shows it)
+    // We detect this by checking if the response status was 401
+    // Since we can't read HTTP status in JS directly, we use a meta approach:
+    // The server will add a response header X-Login-Error which we check via fetch
+    // Instead, simpler: check if URL has ?error param or use a hidden field
+    const form = document.getElementById('login-form');
+    const btn = document.getElementById('submit-btn');
+
+    form.addEventListener('submit', () => {
+      btn.disabled = true;
+      btn.textContent = 'Signing in…';
+    });
+
+    // Show error if page loaded with 401 (detected via custom header on redirect)
+    // Railway/server will redirect to /login?error=1 on bad password
+    if (new URLSearchParams(window.location.search).get('error') === '1') {
+      document.getElementById('error-box').classList.add('visible');
+    }
+  </script>
+</body>
+</html>

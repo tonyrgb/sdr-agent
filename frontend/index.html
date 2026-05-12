@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Virtual SDR Agent — Prius Intelli</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --brand: #0ea5e9; --brand-dark: #0284c7; }
+    body { background: #0f172a; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
+
+    .tab-btn { transition: all .2s; border-bottom: 2px solid transparent; }
+    .tab-btn.active { color: var(--brand); border-bottom-color: var(--brand); }
+    .tab-btn:not(.active):hover { color: #94a3b8; }
+
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; }
+    .card-header { background: #162032; border-bottom: 1px solid #334155; border-radius: 10px 10px 0 0; padding: 12px 16px; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; letter-spacing: .03em; }
+    .badge-best    { background: #14532d; color: #4ade80; }
+    .badge-good    { background: #1e3a5f; color: #60a5fa; }
+    .badge-late    { background: #3d2600; color: #fbbf24; }
+    .badge-skip    { background: #3b0f0f; color: #f87171; }
+    .badge-neutral { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+    .badge-us      { background: #163332; color: #34d399; }
+    .badge-pipeline { background: #1e1b4b; color: #a5b4fc; }
+
+    .stage-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .stage-dot.pending  { background: #475569; }
+    .stage-dot.running  { background: #fbbf24; animation: pulse 1s infinite; }
+    .stage-dot.done     { background: #4ade80; }
+    .stage-dot.error    { background: #f87171; }
+
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+
+    .spinner { width: 18px; height: 18px; border: 2px solid #334155; border-top-color: var(--brand); border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .email-card { background: #151f2e; border: 1px solid #2d3f55; border-radius: 8px; margin-bottom: 12px; }
+    .email-card-header { padding: 10px 14px; border-bottom: 1px solid #2d3f55; display: flex; align-items: center; justify-content: space-between; }
+    .email-body { padding: 14px; font-size: 13.5px; line-height: 1.65; white-space: pre-wrap; color: #cbd5e1; }
+
+    .contact-table th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #64748b; padding: 8px 12px; }
+    .contact-table td { padding: 9px 12px; font-size: 13px; border-top: 1px solid #1e293b; }
+    .contact-table tr:hover td { background: #1a2a3a; }
+
+    .log-entry { font-size: 11px; font-family: monospace; padding: 3px 0; border-bottom: 1px solid #1e293b; color: #64748b; }
+    .log-entry.tool_call   { color: #60a5fa; }
+    .log-entry.tool_result { color: #34d399; }
+    .log-entry.error       { color: #f87171; }
+    .log-entry.stage       { color: #fbbf24; font-weight: 700; }
+
+    .copy-btn { font-size: 11px; padding: 3px 8px; background: #1e3a5f; color: #60a5fa; border: 1px solid #2d5a8a; border-radius: 4px; cursor: pointer; transition: background .15s; }
+    .copy-btn:hover { background: #2d5a8a; }
+    .copy-btn.copied { background: #163332; color: #34d399; border-color: #34d399; }
+
+    .run-btn { background: var(--brand); color: white; padding: 10px 24px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: all .15s; border: none; display: flex; align-items: center; gap: 8px; }
+    .run-btn:hover:not(:disabled) { background: var(--brand-dark); transform: translateY(-1px); }
+    .run-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+    .section-run-btn { background: #1e3a5f; color: #60a5fa; padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid #2d5a8a; transition: all .15s; }
+    .section-run-btn:hover:not(:disabled) { background: #2d5a8a; }
+    .section-run-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    .topic-tab { padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; background: #1e293b; border: 1px solid #334155; color: #94a3b8; transition: all .15s; }
+    .topic-tab.active { background: #1e3a5f; color: #60a5fa; border-color: #2d5a8a; }
+    .topic-tab:hover:not(.active) { border-color: #475569; color: #cbd5e1; }
+
+    input[type="text"], input[type="number"], select {
+      background: #1e293b; border: 1px solid #334155; color: #e2e8f0; border-radius: 6px;
+      padding: 7px 10px; font-size: 13px;
+    }
+    input:focus, select:focus { outline: 2px solid var(--brand); outline-offset: 1px; border-color: var(--brand); }
+
+    .tooltip { position: relative; }
+    .tooltip:hover::after { content: attr(data-tip); position: absolute; left: 50%; transform: translateX(-50%); bottom: 130%; white-space: nowrap; background: #0f172a; border: 1px solid #334155; padding: 4px 8px; border-radius: 4px; font-size: 11px; color: #94a3b8; pointer-events: none; z-index: 50; }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  </style>
+</head>
+<body class="min-h-full">
+
+<!-- ======================================================================
+     HEADER
+======================================================================= -->
+<header class="border-b border-slate-800 px-6 py-4 flex items-center justify-between sticky top-0 z-40" style="background:#0c1628;">
+  <div class="flex items-center gap-3">
+    <div style="background:var(--brand);width:8px;height:32px;border-radius:4px;"></div>
+    <div>
+      <div class="text-white font-bold text-lg leading-none">Virtual SDR Agent</div>
+      <div class="text-slate-500 text-xs mt-0.5">Prius Intelli — Automated Sales Pipeline</div>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-4">
+    <!-- Pipeline status indicator -->
+    <div id="header-status" class="flex items-center gap-2 text-xs text-slate-500">
+      <span class="stage-dot pending" id="header-dot"></span>
+      <span id="header-status-text">Idle</span>
+    </div>
+
+    <!-- Next scheduled run -->
+    <div class="text-xs text-slate-500 hidden md:block" id="next-run-label">
+      Next: <span id="next-run-text" class="text-slate-400">loading…</span>
+    </div>
+
+    <!-- Run Pipeline button -->
+    <button class="run-btn" id="run-pipeline-btn" onclick="runPipeline()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      Run Pipeline
+    </button>
+  </div>
+</header>
+
+<!-- ======================================================================
+     PIPELINE STAGE BAR
+======================================================================= -->
+<div class="px-6 py-3 border-b border-slate-800 flex items-center gap-6" style="background:#0c1628;">
+  <div class="flex items-center gap-2 text-sm">
+    <span class="stage-dot pending" id="dot-signals"></span>
+    <span class="text-slate-400 font-medium">1. Morning Scout</span>
+  </div>
+  <div class="text-slate-700">→</div>
+  <div class="flex items-center gap-2 text-sm">
+    <span class="stage-dot pending" id="dot-contacts"></span>
+    <span class="text-slate-400 font-medium">2. Coordinator</span>
+  </div>
+  <div class="text-slate-700">→</div>
+  <div class="flex items-center gap-2 text-sm">
+    <span class="stage-dot pending" id="dot-emails"></span>
+    <span class="text-slate-400 font-medium">3. Email Campaigns</span>
+  </div>
+
+  <div class="ml-auto flex items-center gap-3">
+    <button class="text-xs text-slate-500 hover:text-slate-300 transition-colors" onclick="clearState()">Clear Results</button>
+    <div id="activity-log-toggle" class="text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer" onclick="toggleLog()">Activity Log ▾</div>
+  </div>
+</div>
+
+<!-- Activity log (collapsible) -->
+<div id="activity-log" class="hidden px-6 py-3 border-b border-slate-800 max-h-40 overflow-y-auto" style="background:#080f1a;">
+  <div id="log-entries"></div>
+</div>
+
+<!-- ======================================================================
+     MAIN TABS
+======================================================================= -->
+<div class="border-b border-slate-800 px-6" style="background:#0c1628;">
+  <nav class="flex gap-1 -mb-px">
+    <button class="tab-btn active px-4 py-3 text-sm font-medium" onclick="showTab('signals', this)">
+      🔭 Morning Scout
+    </button>
+    <button class="tab-btn px-4 py-3 text-sm font-medium text-slate-400" onclick="showTab('contacts', this)">
+      👥 Coordinator
+    </button>
+    <button class="tab-btn px-4 py-3 text-sm font-medium text-slate-400" onclick="showTab('emails', this)">
+      ✉️ Email Campaigns
+    </button>
+  </nav>
+</div>
+
+<!-- ======================================================================
+     TAB 1: MORNING SCOUT
+======================================================================= -->
+<div id="tab-signals" class="tab-content p-6">
+  <div class="flex items-center justify-between mb-5">
+    <div>
+      <h2 class="text-white font-bold text-xl">Morning Scout</h2>
+      <p class="text-slate-500 text-sm mt-1">Top 5 high-intent signals per topic · Ranked by recency, US project, procurement stage</p>
+    </div>
+    <button class="section-run-btn" onclick="runSignals()" id="run-signals-btn">Run Scout</button>
+  </div>
+
+  <!-- Empty state -->
+  <div id="signals-empty" class="text-center py-20 text-slate-600">
+    <div class="text-5xl mb-4">🔭</div>
+    <div class="text-lg font-medium text-slate-500">No signals loaded yet</div>
+    <div class="text-sm mt-2">Click "Run Scout" or "Run Pipeline" to fetch this week's signals</div>
+  </div>
+
+  <!-- Loading state -->
+  <div id="signals-loading" class="hidden text-center py-20">
+    <div class="spinner mx-auto mb-4"></div>
+    <div class="text-slate-400 text-sm" id="signals-loading-text">Querying Prius Signals…</div>
+  </div>
+
+  <!-- Error state -->
+  <div id="signals-error" class="hidden card p-5" style="border-color:#7f1d1d; background:#1c0a0a;">
+    <div class="text-red-400 font-semibold mb-1">Scout Error</div>
+    <div class="text-red-300 text-sm" id="signals-error-text"></div>
+  </div>
+
+  <!-- Topic filter tabs -->
+  <div id="signals-topic-bar" class="hidden flex flex-wrap gap-2 mb-5" id="topic-tabs"></div>
+
+  <!-- Results -->
+  <div id="signals-results" class="hidden"></div>
+</div>
+
+<!-- ======================================================================
+     TAB 2: COORDINATOR
+======================================================================= -->
+<div id="tab-contacts" class="tab-content hidden p-6">
+  <div class="flex items-center justify-between mb-5">
+    <div>
+      <h2 class="text-white font-bold text-xl">Coordinator</h2>
+      <p class="text-slate-500 text-sm mt-1">Top 5 contacts per signal · Sourced from HubSpot + Apollo · Ranked by role & engagement</p>
+    </div>
+    <button class="section-run-btn" onclick="runContacts()" id="run-contacts-btn">Source Contacts</button>
+  </div>
+
+  <div id="contacts-empty" class="text-center py-20 text-slate-600">
+    <div class="text-5xl mb-4">👥</div>
+    <div class="text-lg font-medium text-slate-500">No contacts sourced yet</div>
+    <div class="text-sm mt-2">Complete the Morning Scout step first, then click "Source Contacts"</div>
+  </div>
+
+  <div id="contacts-loading" class="hidden text-center py-20">
+    <div class="spinner mx-auto mb-4"></div>
+    <div class="text-slate-400 text-sm" id="contacts-loading-text">Searching HubSpot and Apollo…</div>
+  </div>
+
+  <div id="contacts-error" class="hidden card p-5" style="border-color:#7f1d1d; background:#1c0a0a;">
+    <div class="text-red-400 font-semibold mb-1">Coordinator Error</div>
+    <div class="text-red-300 text-sm" id="contacts-error-text"></div>
+  </div>
+
+  <div id="contacts-results" class="hidden space-y-6"></div>
+</div>
+
+<!-- ======================================================================
+     TAB 3: EMAIL CAMPAIGNS
+======================================================================= -->
+<div id="tab-emails" class="tab-content hidden p-6">
+  <div class="flex items-center justify-between mb-5">
+    <div>
+      <h2 class="text-white font-bold text-xl">Email Campaigns</h2>
+      <p class="text-slate-500 text-sm mt-1">3-touch sequences per contact · Touch 1 signal-anchored · Touch 2 credibility · Touch 3 break-up</p>
+    </div>
+    <div class="flex gap-3">
+      <button class="copy-btn" onclick="exportAllEmails()">Export All CSV</button>
+      <button class="section-run-btn" onclick="runEmails()" id="run-emails-btn">Generate Emails</button>
+    </div>
+  </div>
+
+  <div id="emails-empty" class="text-center py-20 text-slate-600">
+    <div class="text-5xl mb-4">✉️</div>
+    <div class="text-lg font-medium text-slate-500">No email campaigns yet</div>
+    <div class="text-sm mt-2">Complete the Coordinator step first, then click "Generate Emails"</div>
+  </div>
+
+  <div id="emails-loading" class="hidden text-center py-20">
+    <div class="spinner mx-auto mb-4"></div>
+    <div class="text-slate-400 text-sm" id="emails-loading-text">Writing personalized email sequences…</div>
+  </div>
+
+  <div id="emails-error" class="hidden card p-5" style="border-color:#7f1d1d; background:#1c0a0a;">
+    <div class="text-red-400 font-semibold mb-1">Email Generation Error</div>
+    <div class="text-red-300 text-sm" id="emails-error-text"></div>
+  </div>
+
+  <!-- Signal filter for emails -->
+  <div id="emails-signal-bar" class="hidden flex flex-wrap gap-2 mb-5"></div>
+
+  <div id="emails-results" class="hidden"></div>
+</div>
+
+<!-- ======================================================================
+     JAVASCRIPT
+======================================================================= -->
+<script>
+// =========================================================================
+// State
+// =========================================================================
+const state = {
+  signals: null,
+  contacts: null,
+  emails: null,
+  running: false,
+  activeTab: 'signals',
+  activeSignalTopic: null,
+  activeEmailSignal: null,
+};
+
+// =========================================================================
+// Tab navigation
+// =========================================================================
+function showTab(name, btn) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+  document.querySelectorAll('.tab-btn').forEach(el => {
+    el.classList.remove('active');
+    el.classList.add('text-slate-400');
+  });
+  document.getElementById('tab-' + name).classList.remove('hidden');
+  btn.classList.add('active');
+  btn.classList.remove('text-slate-400');
+  state.activeTab = name;
+}
+
+// =========================================================================
+// Activity log
+// =========================================================================
+function toggleLog() {
+  const log = document.getElementById('activity-log');
+  const toggle = document.getElementById('activity-log-toggle');
+  log.classList.toggle('hidden');
+  toggle.textContent = log.classList.contains('hidden') ? 'Activity Log ▾' : 'Activity Log ▴';
+}
+
+function addLog(event) {
+  const container = document.getElementById('log-entries');
+  const ts = new Date().toLocaleTimeString();
+  const div = document.createElement('div');
+  div.className = 'log-entry ' + (event.type || '');
+
+  let text = `[${ts}] `;
+  if (event.type === 'tool_call')   text += `→ ${event.tool}(${JSON.stringify(event.params).slice(0, 80)})`;
+  else if (event.type === 'tool_result') text += `← ${event.tool}: ${event.preview}`;
+  else if (event.type === 'stage')  text += `STAGE ${event.stage.toUpperCase()}: ${event.status}`;
+  else if (event.type === 'error')  text += `ERROR: ${event.message}`;
+  else                              text += JSON.stringify(event).slice(0, 120);
+
+  div.textContent = text;
+  container.prepend(div);
+
+  // Auto-open log when activity happens
+  const log = document.getElementById('activity-log');
+  if (log.classList.contains('hidden') && ['tool_call', 'stage', 'error'].includes(event.type)) {
+    toggleLog();
+  }
+}
+
+// =========================================================================
+// Stage dot helpers
+// =========================================================================
+function setDot(stage, status) {
+  const dot = document.getElementById('dot-' + stage);
+  if (!dot) return;
+  dot.className = 'stage-dot ' + status;
+}
+
+function setHeaderStatus(text, dotClass) {
+  document.getElementById('header-status-text').textContent = text;
+  document.getElementById('header-dot').className = 'stage-dot ' + dotClass;
+}
+
+// =========================================================================
+// SSE stream helper
+// =========================================================================
+async function streamSSE(url, method, onEvent) {
+  const resp = await fetch(url, { method });
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`${resp.status}: ${err}`);
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try {
+          const event = JSON.parse(line.slice(6));
+          onEvent(event);
+        } catch {}
+      }
+    }
+  }
+}
+
+// =========================================================================
+// Run Signals (Tab 1)
+// =========================================================================
+async function runSignals() {
+  setDot('signals', 'running');
+  setHeaderStatus('Running Scout…', 'running');
+  showLoading('signals', 'Querying Prius Signals…');
+  document.getElementById('run-signals-btn').disabled = true;
+
+  try {
+    await streamSSE('/api/signals/run', 'POST', (event) => {
+      addLog(event);
+
+      if (event.type === 'stage' && event.status === 'running') {
+        document.getElementById('signals-loading-text').textContent = 'Ranking and grouping signals…';
+      }
+
+      if (event.type === 'stage' && event.status === 'done') {
+        state.signals = event.data;
+        renderSignals(event.data);
+        setDot('signals', 'done');
+        setHeaderStatus('Scout complete', 'done');
+      }
+
+      if (event.type === 'error') {
+        showError('signals', event.message);
+        setDot('signals', 'error');
+        setHeaderStatus('Scout error', 'error');
+      }
+    });
+  } catch (e) {
+    showError('signals', e.message);
+    setDot('signals', 'error');
+    setHeaderStatus('Scout error', 'error');
+  } finally {
+    document.getElementById('run-signals-btn').disabled = false;
+    hideLoading('signals');
+  }
+}
+
+// =========================================================================
+// Run Contacts (Tab 2)
+// =========================================================================
+async function runContacts() {
+  if (!state.signals) { alert('Run Morning Scout first.'); return; }
+  setDot('contacts', 'running');
+  setHeaderStatus('Sourcing contacts…', 'running');
+  showLoading('contacts', 'Searching HubSpot and Apollo…');
+  document.getElementById('run-contacts-btn').disabled = true;
+
+  try {
+    await streamSSE('/api/contacts/run', 'POST', (event) => {
+      addLog(event);
+
+      if (event.type === 'tool_call' && event.tool === 'search_crm_objects') {
+        document.getElementById('contacts-loading-text').textContent =
+          `Searching HubSpot for ${event.params?.filterGroups?.[0]?.filters?.[0]?.value || '…'}`;
+      }
+      if (event.type === 'tool_call' && event.tool.includes('apollo')) {
+        document.getElementById('contacts-loading-text').textContent =
+          `Searching Apollo for ${event.params?.q_organization_name || '…'}`;
+      }
+
+      if (event.type === 'stage' && event.status === 'done') {
+        state.contacts = event.data;
+        renderContacts(event.data);
+        setDot('contacts', 'done');
+        setHeaderStatus('Contacts sourced', 'done');
+      }
+
+      if (event.type === 'error') {
+        showError('contacts', event.message);
+        setDot('contacts', 'error');
+      }
+    });
+  } catch (e) {
+    showError('contacts', e.message);
+    setDot('contacts', 'error');
+  } finally {
+    document.getElementById('run-contacts-btn').disabled = false;
+    hideLoading('contacts');
+  }
+}
+
+// =========================================================================
+// Run Emails (Tab 3)
+// =========================================================================
+async function runEmails() {
+  if (!state.contacts) { alert('Run Coordinator first.'); return; }
+  setDot('emails', 'running');
+  setHeaderStatus('Generating emails…', 'running');
+  showLoading('emails', 'Writing personalized email sequences…');
+  document.getElementById('run-emails-btn').disabled = true;
+
+  try {
+    await streamSSE('/api/emails/run', 'POST', (event) => {
+      addLog(event);
+
+      if (event.type === 'stage' && event.status === 'done') {
+        state.emails = event.data;
+        renderEmails(event.data);
+        setDot('emails', 'done');
+        setHeaderStatus('Pipeline complete', 'done');
+      }
+
+      if (event.type === 'error') {
+        showError('emails', event.message);
+        setDot('emails', 'error');
+      }
+    });
+  } catch (e) {
+    showError('emails', e.message);
+    setDot('emails', 'error');
+  } finally {
+    document.getElementById('run-emails-btn').disabled = false;
+    hideLoading('emails');
+  }
+}
+
+// =========================================================================
+// Run full pipeline
+// =========================================================================
+async function runPipeline() {
+  if (state.running) return;
+  state.running = true;
+  const btn = document.getElementById('run-pipeline-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px"></div> Running…';
+
+  setDot('signals',  'pending');
+  setDot('contacts', 'pending');
+  setDot('emails',   'pending');
+  setHeaderStatus('Running pipeline…', 'running');
+
+  // Pre-show loading on first tab
+  showTab('signals', document.querySelector('.tab-btn'));
+  showLoading('signals', 'Starting pipeline…');
+
+  try {
+    await streamSSE('/api/pipeline/run', 'POST', (event) => {
+      addLog(event);
+
+      if (event.type === 'stage') {
+        const { stage, status, data } = event;
+
+        if (status === 'running') {
+          setDot(stage, 'running');
+          if (stage === 'signals')  { showLoading('signals',  'Querying Prius Signals…'); }
+          if (stage === 'contacts') { hideLoading('signals'); showLoading('contacts', 'Sourcing contacts…'); }
+          if (stage === 'emails')   { hideLoading('contacts'); showLoading('emails', 'Writing emails…'); }
+        }
+
+        if (status === 'done') {
+          setDot(stage, 'done');
+          hideLoading(stage);
+          if (stage === 'signals'  && data) { state.signals  = data; renderSignals(data);   }
+          if (stage === 'contacts' && data) { state.contacts = data; renderContacts(data); }
+          if (stage === 'emails'   && data) { state.emails   = data; renderEmails(data);   }
+        }
+      }
+
+      if (event.type === 'pipeline_complete') {
+        setHeaderStatus('Pipeline complete · ' + new Date().toLocaleTimeString(), 'done');
+        // Switch to emails tab
+        showTab('emails', document.querySelectorAll('.tab-btn')[2]);
+      }
+
+      if (event.type === 'pipeline_error') {
+        const stage = event.stage || 'pipeline';
+        showError(stage, event.message);
+        setDot(stage, 'error');
+        setHeaderStatus('Pipeline error', 'error');
+      }
+    });
+  } catch (e) {
+    setHeaderStatus('Pipeline error', 'error');
+    addLog({ type: 'error', message: e.message });
+  } finally {
+    state.running = false;
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run Pipeline';
+    ['signals','contacts','emails'].forEach(s => hideLoading(s));
+  }
+}
+
+// =========================================================================
+// Render: Signals (Tab 1)
+// =========================================================================
+function renderSignals(data) {
+  const topics = data.topics || [];
+  if (!topics.length) {
+    document.getElementById('signals-empty').classList.remove('hidden');
+    return;
+  }
+
+  state.activeSignalTopic = topics[0].topicName;
+
+  // Topic filter tabs
+  const topicBar = document.getElementById('signals-topic-bar');
+  topicBar.innerHTML = '';
+  topicBar.classList.remove('hidden');
+  topics.forEach(t => {
+    const btn = document.createElement('button');
+    btn.className = 'topic-tab' + (t.topicName === state.activeSignalTopic ? ' active' : '');
+    btn.textContent = `${t.topicName} (${t.signals?.length || 0})`;
+    btn.onclick = () => {
+      state.activeSignalTopic = t.topicName;
+      document.querySelectorAll('.topic-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderSignalList(topics);
+    };
+    topicBar.appendChild(btn);
+  });
+
+  renderSignalList(topics);
+
+  document.getElementById('signals-results').classList.remove('hidden');
+  document.getElementById('signals-empty').classList.add('hidden');
+}
+
+function renderSignalList(topics) {
+  const container = document.getElementById('signals-results');
+  const topic = topics.find(t => t.topicName === state.activeSignalTopic) || topics[0];
+  if (!topic) return;
+
+  container.innerHTML = `
+    <div class="text-xs text-slate-500 mb-4">
+      Showing top ${topic.signals?.length || 0} signals for <strong class="text-slate-300">${topic.topicName}</strong>
+    </div>
+    ${(topic.signals || []).map(sig => renderSignalCard(sig)).join('')}
+  `;
+}
+
+function intentBadge(score) {
+  const cls = { BEST: 'badge-best', GOOD: 'badge-good', LATE: 'badge-late', SKIP: 'badge-skip' }[score] || 'badge-neutral';
+  return `<span class="badge ${cls}">${score || 'UNKNOWN'}</span>`;
+}
+
+function renderSignalCard(sig) {
+  return `
+    <div class="card mb-4">
+      <div class="card-header flex items-start justify-between">
+        <div class="flex-1 min-w-0 pr-4">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-white font-semibold text-sm leading-snug">${esc(sig.title)}</span>
+            ${intentBadge(sig.intentScore)}
+            ${sig.usProject === true  ? '<span class="badge badge-us">US Project</span>' : ''}
+            ${sig.namedProject === true ? '<span class="badge badge-pipeline">Named Project</span>' : ''}
+            ${sig.signalType === 'Pipeline' ? '<span class="badge badge-pipeline">Pipeline</span>' : ''}
+          </div>
+          <div class="flex items-center gap-3 mt-1 text-xs text-slate-500">
+            <span class="font-medium text-sky-400">${esc(sig.company)}</span>
+            <span>·</span>
+            <span>${formatDate(sig.date)}</span>
+            ${sig.source ? `<span>·</span><span>${esc(sig.source)}</span>` : ''}
+          </div>
+        </div>
+        <div class="text-slate-600 text-xs whitespace-nowrap font-mono">#${sig.rank}</div>
+      </div>
+      <div class="p-4">
+        <p class="text-slate-300 text-sm leading-relaxed mb-3">${esc(sig.summary)}</p>
+        ${sig.outreachHook ? `
+          <div class="rounded-md p-3 text-xs" style="background:#0f2339; border: 1px solid #1e3a5f;">
+            <span class="text-slate-500 font-semibold uppercase tracking-wide text-xs">Outreach Hook · </span>
+            <span class="text-sky-300">${esc(sig.outreachHook)}</span>
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  `;
+}
+
+// =========================================================================
+// Render: Contacts (Tab 2)
+// =========================================================================
+function renderContacts(data) {
+  const signals = data.signals || [];
+  const container = document.getElementById('contacts-results');
+
+  if (!signals.length) {
+    document.getElementById('contacts-empty').classList.remove('hidden');
+    return;
+  }
+
+  container.innerHTML = signals.map(sig => `
+    <div class="card">
+      <div class="card-header flex items-center justify-between">
+        <div>
+          <div class="text-white font-semibold text-sm">${esc(sig.signalTitle || sig.company)}</div>
+          <div class="text-xs text-slate-500 mt-0.5">
+            <span class="text-sky-400 font-medium">${esc(sig.company)}</span>
+            <span class="ml-2 text-slate-600">
+              HubSpot: ${sig.hubspotCount || 0} · Apollo: ${sig.apolloCount || 0} ·
+              Deduped: ${sig.duplicatesRemoved || 0} · Showing top ${sig.contacts?.length || 0}
+            </span>
+          </div>
+        </div>
+        <span class="badge badge-neutral">${sig.totalFound || sig.contacts?.length || 0} found</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="contact-table w-full">
+          <thead>
+            <tr class="text-left" style="background:#162032;">
+              <th>#</th>
+              <th>First Name</th>
+              <th>Last Name</th>
+              <th>Title</th>
+              <th>Email</th>
+              <th>Source</th>
+              <th>Priority</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(sig.contacts || []).map(c => `
+              <tr>
+                <td class="text-slate-600">${c.rank}</td>
+                <td class="text-slate-200 font-medium">${esc(c.firstName)}</td>
+                <td class="text-slate-200">${esc(c.lastName)}</td>
+                <td class="text-slate-400">${esc(c.title)}</td>
+                <td class="font-mono text-xs text-sky-400">${c.email ? esc(c.email) : '<span class="text-slate-600">—</span>'}</td>
+                <td>
+                  <span class="badge ${c.source === 'Both' ? 'badge-us' : 'badge-neutral'}">${esc(c.source || 'Unknown')}</span>
+                </td>
+                <td>
+                  <span class="badge ${c.conversionScore === 'High' ? 'badge-best' : c.conversionScore === 'Medium' ? 'badge-good' : 'badge-neutral'}">
+                    ${c.conversionScore || '—'}
+                  </span>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `).join('');
+
+  container.classList.remove('hidden');
+  document.getElementById('contacts-empty').classList.add('hidden');
+}
+
+// =========================================================================
+// Render: Emails (Tab 3)
+// =========================================================================
+function renderEmails(data) {
+  const campaigns = data.campaigns || [];
+  const container = document.getElementById('emails-results');
+  const bar = document.getElementById('emails-signal-bar');
+
+  if (!campaigns.length) {
+    document.getElementById('emails-empty').classList.remove('hidden');
+    return;
+  }
+
+  // Group by signal
+  const bySignal = {};
+  campaigns.forEach(c => {
+    const key = c.signalId || c.signalTitle || 'Unknown';
+    if (!bySignal[key]) bySignal[key] = { title: c.signalTitle, company: c.company, campaigns: [] };
+    bySignal[key].campaigns.push(c);
+  });
+
+  const signalKeys = Object.keys(bySignal);
+  state.activeEmailSignal = state.activeEmailSignal || signalKeys[0];
+
+  // Signal filter bar
+  bar.innerHTML = '';
+  bar.classList.remove('hidden');
+  signalKeys.forEach(key => {
+    const btn = document.createElement('button');
+    btn.className = 'topic-tab' + (key === state.activeEmailSignal ? ' active' : '');
+    const count = bySignal[key].campaigns.length;
+    btn.textContent = `${bySignal[key].company || key} (${count})`;
+    btn.onclick = () => {
+      state.activeEmailSignal = key;
+      document.querySelectorAll('#emails-signal-bar .topic-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderEmailList(bySignal);
+    };
+    bar.appendChild(btn);
+  });
+
+  renderEmailList(bySignal);
+
+  container.classList.remove('hidden');
+  document.getElementById('emails-empty').classList.add('hidden');
+}
+
+function renderEmailList(bySignal) {
+  const container = document.getElementById('emails-results');
+  const key = state.activeEmailSignal || Object.keys(bySignal)[0];
+  const group = bySignal[key];
+  if (!group) return;
+
+  const touchColors = { 1: '#1e3a5f', 2: '#1a2f1a', 3: '#3d1a1a' };
+  const touchLabels  = { 1: 'Touch 1 — Signal Outreach', 2: 'Touch 2 — Credibility', 3: 'Touch 3 — Break-up' };
+  const touchBadges  = { 1: 'badge-good', 2: 'badge-us', 3: 'badge-late' };
+
+  container.innerHTML = group.campaigns.map(campaign => `
+    <div class="card mb-6">
+      <div class="card-header">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-white font-semibold text-sm">${esc(campaign.contact?.firstName)} ${esc(campaign.contact?.lastName)}</div>
+            <div class="text-xs text-slate-500 mt-0.5">
+              <span class="text-slate-400">${esc(campaign.contact?.title || '')}</span>
+              ${campaign.contact?.email ? ` · <span class="font-mono text-sky-400">${esc(campaign.contact.email)}</span>` : ''}
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button class="copy-btn" onclick="copyAllEmails(this, '${campaign.signalId}_${campaign.contact?.email || campaign.contact?.firstName}')">Copy All 3</button>
+          </div>
+        </div>
+        <div class="text-xs text-slate-600 mt-2">Signal: ${esc(campaign.signalTitle || '')}</div>
+      </div>
+
+      <div class="p-4 space-y-3">
+        ${(campaign.emails || []).map(email => `
+          <div class="email-card">
+            <div class="email-card-header" style="background:${touchColors[email.touchNumber] || '#1e293b'}22; border-color:${touchColors[email.touchNumber] || '#334155'}55;">
+              <div class="flex items-center gap-2">
+                <span class="badge ${touchBadges[email.touchNumber] || 'badge-neutral'}">${touchLabels[email.touchNumber] || 'Touch ' + email.touchNumber}</span>
+                ${email.tactic ? `<span class="badge badge-neutral text-xs">${email.tactic.replace('_', ' ')}</span>` : ''}
+              </div>
+              <div class="flex items-center gap-3">
+                <span class="text-xs text-slate-500">Subj: <span class="text-slate-300">${esc(email.subject || '')}</span></span>
+                <button class="copy-btn" data-text="${esc(email.body || '')}" onclick="copyEmail(this)">Copy</button>
+              </div>
+            </div>
+            ${email.personalizationNote ? `
+              <div class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/50" style="background:#0a1219;">
+                <span class="text-slate-600">Hook: </span>${esc(email.personalizationNote)}
+              </div>
+            ` : ''}
+            <div class="email-body">${esc(email.body || '')}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+// =========================================================================
+// Clipboard utilities
+// =========================================================================
+function copyEmail(btn) {
+  const text = btn.getAttribute('data-text');
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+
+function copyAllEmails(btn, key) {
+  const campaign = (state.emails?.campaigns || []).find(c =>
+    (c.signalId + '_' + (c.contact?.email || c.contact?.firstName)) === key
+  );
+  if (!campaign) return;
+  const text = (campaign.emails || []).map(e =>
+    `--- Touch ${e.touchNumber} ---\nSubject: ${e.subject}\n\n${e.body}`
+  ).join('\n\n');
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy All 3'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+
+function exportAllEmails() {
+  const campaigns = state.emails?.campaigns || [];
+  if (!campaigns.length) { alert('No emails to export.'); return; }
+
+  const rows = [['Signal', 'Company', 'First Name', 'Last Name', 'Title', 'Email', 'Touch', 'Subject', 'Body', 'Tactic']];
+  campaigns.forEach(c => {
+    (c.emails || []).forEach(e => {
+      rows.push([
+        c.signalTitle, c.company,
+        c.contact?.firstName, c.contact?.lastName, c.contact?.title, c.contact?.email || '',
+        e.touchNumber, e.subject, e.body.replace(/\n/g, ' '), e.tactic || ''
+      ]);
+    });
+  });
+
+  const csv = rows.map(r => r.map(v => `"${String(v || '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = `sdr_emails_${dateStr()}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+// =========================================================================
+// UI helpers
+// =========================================================================
+function showLoading(stage, text) {
+  const emptyEl   = document.getElementById(stage + '-empty');
+  const loadingEl = document.getElementById(stage + '-loading');
+  const resultsEl = document.getElementById(stage + '-results');
+  const errorEl   = document.getElementById(stage + '-error');
+  if (emptyEl)   emptyEl.classList.add('hidden');
+  if (loadingEl) { loadingEl.classList.remove('hidden'); }
+  if (resultsEl) resultsEl.classList.add('hidden');
+  if (errorEl)   errorEl.classList.add('hidden');
+  const textEl = document.getElementById(stage + '-loading-text');
+  if (textEl && text) textEl.textContent = text;
+}
+
+function hideLoading(stage) {
+  const loadingEl = document.getElementById(stage + '-loading');
+  if (loadingEl) loadingEl.classList.add('hidden');
+}
+
+function showError(stage, msg) {
+  hideLoading(stage);
+  const errorEl = document.getElementById(stage + '-error');
+  const textEl  = document.getElementById(stage + '-error-text');
+  if (errorEl) errorEl.classList.remove('hidden');
+  if (textEl)  textEl.textContent = msg;
+}
+
+function clearState() {
+  fetch('/api/state', { method: 'DELETE' }).then(() => {
+    state.signals = state.contacts = state.emails = null;
+    ['signals', 'contacts', 'emails'].forEach(s => {
+      setDot(s, 'pending');
+      hideLoading(s);
+      const emptyEl   = document.getElementById(s + '-empty');
+      const resultsEl = document.getElementById(s + '-results');
+      const errorEl   = document.getElementById(s + '-error');
+      if (emptyEl)   emptyEl.classList.remove('hidden');
+      if (resultsEl) { resultsEl.classList.add('hidden'); resultsEl.innerHTML = ''; }
+      if (errorEl)   errorEl.classList.add('hidden');
+    });
+    document.getElementById('signals-topic-bar').classList.add('hidden');
+    document.getElementById('emails-signal-bar').classList.add('hidden');
+    setHeaderStatus('Idle', 'pending');
+    document.getElementById('log-entries').innerHTML = '';
+  });
+}
+
+function esc(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatDate(d) {
+  if (!d) return '—';
+  try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
+  catch { return d; }
+}
+
+function dateStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// =========================================================================
+// Load existing state on page load
+// =========================================================================
+async function loadState() {
+  try {
+    const resp = await fetch('/api/state');
+    const data = await resp.json();
+
+    if (data.signals)  { state.signals  = data.signals;  renderSignals(data.signals);   setDot('signals',  'done'); }
+    if (data.contacts) { state.contacts = data.contacts; renderContacts(data.contacts); setDot('contacts', 'done'); }
+    if (data.emails)   { state.emails   = data.emails;   renderEmails(data.emails);     setDot('emails',   'done'); }
+
+    if (data.lastRun) {
+      setHeaderStatus('Last run: ' + new Date(data.lastRun).toLocaleString(), 'done');
+    }
+
+    if (data.nextRun) {
+      const d = new Date(data.nextRun);
+      document.getElementById('next-run-text').textContent =
+        d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) +
+        ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+    }
+  } catch (e) {
+    console.warn('Could not load state:', e.message);
+  }
+}
+
+loadState();
+</script>
+</body>
+</html>

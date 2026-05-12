@@ -532,7 +532,6 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=60 * 60 * 12)
 
 
 # ---------------------------------------------------------------------------
@@ -553,6 +552,7 @@ async def require_auth(request: Request, call_next):
         return RedirectResponse("/login", status_code=302)
 
     return await call_next(request)
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=60 * 60 * 12)
 
 
 # ---------------------------------------------------------------------------

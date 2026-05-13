@@ -368,7 +368,7 @@ async def run_signals_stage(sse_queue: asyncio.Queue | None = None) -> dict:
         user_message=(
             "Run the signal monitoring workflow now. "
             "Query Prius Signals with: sortBy=createdAt, sortOrder=desc, dateRange=month, "
-            "relevance=active, limit=100. Filter out NOT_RELEVANT signals, rank the rest "
+            "relevance=all, limit=100. Filter out NOT_RELEVANT signals, rank the rest "
             "using all five criteria, group by topicName, and return the top 5 per topic as JSON."
         ),
         tools=[TOOL_QUERY_SIGNALS],

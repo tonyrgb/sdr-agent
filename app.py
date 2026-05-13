@@ -141,22 +141,73 @@ TOOL_APOLLO_PEOPLE_SEARCH = {
 }
 
 # ---------------------------------------------------------------------------
-# Tool execution — actual REST calls
+# Tool execution
 # ---------------------------------------------------------------------------
 
 async def execute_query_signals(params: dict) -> dict:
-    """Call Prius Signals REST API."""
-    url = f"{PRIUS_SIGNALS_BASE_URL}/api/signals"
-    headers = {}
+    """Call Prius Signals via MCP (JSON-RPC over HTTP)."""
+    mcp_url = f"{PRIUS_SIGNALS_BASE_URL}/mcp"
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
     if PRIUS_SIGNALS_TOKEN:
         headers["Authorization"] = f"Bearer {PRIUS_SIGNALS_TOKEN}"
 
-    query_params = {k: v for k, v in params.items() if v is not None}
+    arguments = {k: v for k, v in params.items() if v is not None}
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "method": "tools/call",
+        "params": {"name": "query_signals", "arguments": arguments},
+    }
 
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(url, params=query_params, headers=headers)
+        resp = await client.post(mcp_url, json=payload, headers=headers)
         resp.raise_for_status()
-        return resp.json()
+
+        if "text/event-stream" in resp.headers.get("content-type", ""):
+            return _extract_mcp_sse_result(resp.text)
+
+        data = resp.json()
+
+    if "error" in data:
+        err = data["error"]
+        raise ValueError(f"MCP error {err.get('code')}: {err.get('message')}")
+
+    return _extract_mcp_result(data.get("result", {}))
+
+
+def _extract_mcp_result(result: dict) -> dict:
+    """Parse the content blocks from an MCP tools/call result."""
+    content = result.get("content", [])
+    if content and content[0].get("type") == "text":
+        try:
+            return json.loads(content[0]["text"])
+        except (json.JSONDecodeError, KeyError):
+            return {"text": content[0].get("text", "")}
+    return result
+
+
+def _extract_mcp_sse_result(sse_body: str) -> dict:
+    """Extract the JSON-RPC result from a text/event-stream response body."""
+    for line in sse_body.splitlines():
+        if not line.startswith("data:"):
+            continue
+        data_str = line[5:].strip()
+        if not data_str or data_str == "[DONE]":
+            continue
+        try:
+            data = json.loads(data_str)
+        except json.JSONDecodeError:
+            continue
+        if "error" in data:
+            err = data["error"]
+            raise ValueError(f"MCP error {err.get('code')}: {err.get('message')}")
+        if "result" in data:
+            return _extract_mcp_result(data["result"])
+    raise ValueError("No valid MCP result found in SSE response")
 
 
 async def execute_hubspot_search(params: dict) -> dict:

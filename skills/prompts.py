@@ -12,7 +12,7 @@ Use query_signals with these defaults:
   sortBy: createdAt
   sortOrder: desc
   dateRange: month
-  relevance: active
+  relevance: all
   limit: 100
 
 Immediately after fetching, discard any signal where relevance === "NOT_RELEVANT". These have been reviewed and dismissed -- never surface them.

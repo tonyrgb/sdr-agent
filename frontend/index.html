@@ -318,7 +318,16 @@ function addLog(event) {
   let text = `[${ts}] `;
   if (event.type === 'tool_call')   text += `→ ${event.tool}(${JSON.stringify(event.params).slice(0, 80)})`;
   else if (event.type === 'tool_result') text += `← ${event.tool}: ${event.preview}`;
-  else if (event.type === 'stage')  text += `STAGE ${event.stage.toUpperCase()}: ${event.status}`;
+  else if (event.type === 'stage') {
+    let stageText = `STAGE ${event.stage.toUpperCase()}: ${event.status}`;
+    if (event.status === 'done' && event.data) {
+      const topics = Array.isArray(event.data) ? event.data : (event.data.topics || []);
+      const sigCount = topics.reduce((n, t) => n + (t.signals?.length || 0), 0);
+      if (topics.length) stageText += ` · ${topics.length} topics, ${sigCount} signals`;
+      else stageText += ` · data=${JSON.stringify(event.data).slice(0, 80)}`;
+    }
+    text += stageText;
+  }
   else if (event.type === 'error')  text += `ERROR: ${event.message}`;
   else                              text += JSON.stringify(event).slice(0, 120);
 
@@ -564,13 +573,15 @@ async function runPipeline() {
 // Render: Signals (Tab 1)
 // =========================================================================
 function renderSignals(data) {
+  console.log('[renderSignals] raw data:', JSON.stringify(data)?.slice(0, 300));
   if (!data || data.error) {
     document.getElementById('signals-empty').classList.remove('hidden');
     if (data?.error) showError('signals', `Signal processing failed: ${data.error}`);
     return;
   }
 
-  const topics = data.topics || [];
+  // Handle both {topics:[...]} wrapper object and direct array of topics
+  const topics = Array.isArray(data) ? data : (data.topics || []);
   if (!topics.length) {
     document.getElementById('signals-empty').classList.remove('hidden');
     return;

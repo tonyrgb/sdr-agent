@@ -193,7 +193,7 @@
   </div>
 
   <!-- Topic filter tabs -->
-  <div id="signals-topic-bar" class="hidden flex flex-wrap gap-2 mb-5" id="topic-tabs"></div>
+  <div id="signals-topic-bar" class="hidden flex flex-wrap gap-2 mb-5"></div>
 
   <!-- Results -->
   <div id="signals-results" class="hidden"></div>
@@ -367,10 +367,9 @@ async function streamSSE(url, method, onEvent) {
     buf = lines.pop();
     for (const line of lines) {
       if (line.startsWith('data: ')) {
-        try {
-          const event = JSON.parse(line.slice(6));
-          onEvent(event);
-        } catch {}
+        let event;
+        try { event = JSON.parse(line.slice(6)); } catch { continue; }
+        onEvent(event);
       }
     }
   }
@@ -565,6 +564,12 @@ async function runPipeline() {
 // Render: Signals (Tab 1)
 // =========================================================================
 function renderSignals(data) {
+  if (!data || data.error) {
+    document.getElementById('signals-empty').classList.remove('hidden');
+    if (data?.error) showError('signals', `Signal processing failed: ${data.error}`);
+    return;
+  }
+
   const topics = data.topics || [];
   if (!topics.length) {
     document.getElementById('signals-empty').classList.remove('hidden');
@@ -603,7 +608,7 @@ function renderSignalList(topics) {
 
   container.innerHTML = `
     <div class="text-xs text-slate-500 mb-4">
-      Showing top ${topic.signals?.length || 0} signals for <strong class="text-slate-300">${topic.topicName}</strong>
+      Showing top ${topic.signals?.length || 0} signals for <strong class="text-slate-300">${esc(topic.topicName)}</strong>
     </div>
     ${(topic.signals || []).map(sig => renderSignalCard(sig)).join('')}
   `;

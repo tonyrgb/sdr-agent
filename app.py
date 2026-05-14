@@ -176,7 +176,24 @@ async def execute_query_signals(params: dict) -> dict:
         err = data["error"]
         raise ValueError(f"MCP error {err.get('code')}: {err.get('message')}")
 
-    return _extract_mcp_result(data.get("result", {}))
+    return _deduplicate_signals(_extract_mcp_result(data.get("result", {})))
+
+
+def _deduplicate_signals(data):
+    """Remove duplicate signals by id, keeping first occurrence."""
+    if isinstance(data, list):
+        seen = set()
+        deduped = []
+        for sig in data:
+            sid = sig.get("id") if isinstance(sig, dict) else None
+            if sid is None or sid not in seen:
+                deduped.append(sig)
+                if sid is not None:
+                    seen.add(sid)
+        return deduped
+    if isinstance(data, dict) and "signals" in data:
+        data["signals"] = _deduplicate_signals(data["signals"])
+    return data
 
 
 def _extract_mcp_result(result: dict) -> dict:
@@ -206,7 +223,7 @@ def _extract_mcp_sse_result(sse_body: str) -> dict:
             err = data["error"]
             raise ValueError(f"MCP error {err.get('code')}: {err.get('message')}")
         if "result" in data:
-            return _extract_mcp_result(data["result"])
+            return _deduplicate_signals(_extract_mcp_result(data["result"]))
     raise ValueError("No valid MCP result found in SSE response")
 
 

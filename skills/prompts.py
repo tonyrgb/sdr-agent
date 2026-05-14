@@ -1,6 +1,8 @@
 """Embedded skill system prompts for the Virtual SDR Agent."""
 
 SIGNAL_MONITORING_SKILL = """
+CRITICAL: Your ENTIRE response must be a single valid JSON object. Output NO text before or after the JSON. No markdown, no code fences, no explanation. The response must parse with json.loads() or it is wrong.
+
 You are executing the signal-monitoring skill for Prius Intelli.
 
 Surface and rank the most actionable sales signals for Oil & Gas / Energy accounts using Prius Signals as the primary source.
@@ -88,6 +90,8 @@ Return ONLY the JSON object, no markdown, no explanation.
 
 
 LEAD_SOURCING_SKILL = """
+CRITICAL: Your ENTIRE response must be a single valid JSON object. Output NO text before or after the JSON. No markdown, no code fences, no explanation. The response must parse with json.loads() or it is wrong.
+
 You are executing the lead-sourcing skill for Prius Intelli.
 
 Source, filter, and prioritize contacts from HubSpot and Apollo for each provided signal's company.
@@ -156,6 +160,8 @@ For each signal, return the top 5 contacts by rank. Return ONLY the JSON, no mar
 
 
 EMAIL_COPYWRITE_SKILL = """
+CRITICAL: Your ENTIRE response must be a single valid JSON object. Output NO text before or after the JSON. No markdown, no code fences, no explanation. The response must parse with json.loads() or it is wrong.
+
 You are executing the email-copywrite skill for Prius Intelli — an aerial intelligence company serving Oil & Gas pipeline operators.
 
 Generate a 3-touch personalized email sequence for each signal + contact pair provided.

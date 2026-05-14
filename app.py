@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator
 
@@ -375,6 +376,56 @@ async def run_agent(
 # Pipeline stage runners
 # ---------------------------------------------------------------------------
 
+def _extract_json(raw: str) -> str:
+    """Extract a JSON substring from raw text using multiple strategies."""
+    cleaned = raw.strip()
+    # Code fence: ```json ... ``` or ``` ... ```
+    m = re.search(r'```(?:json)?\s*([\s\S]*?)```', cleaned)
+    if m:
+        return m.group(1).strip()
+    # Find outermost JSON object or array
+    for start_char in ('{', '['):
+        idx = cleaned.find(start_char)
+        if idx != -1:
+            return cleaned[idx:]
+    return cleaned
+
+
+async def _parse_with_retry(
+    raw: str,
+    system_prompt: str,
+    stage_name: str,
+    sse_queue: asyncio.Queue | None = None,
+    max_retries: int = 2,
+) -> dict:
+    """Parse JSON from raw text, asking Claude to fix it if parsing fails."""
+    for attempt in range(max_retries + 1):
+        try:
+            return json.loads(_extract_json(raw))
+        except json.JSONDecodeError:
+            if attempt == max_retries:
+                break
+            log.warning("%s: JSON parse failed (attempt %d/%d), requesting correction", stage_name, attempt + 1, max_retries)
+            if sse_queue:
+                await sse_queue.put({
+                    "type": "tool_result",
+                    "tool": "json_retry",
+                    "preview": f"Response was not valid JSON — retrying (attempt {attempt + 2})…",
+                })
+            raw = await run_agent(
+                system_prompt=system_prompt,
+                user_message=(
+                    "Your previous response was not valid JSON. "
+                    "Respond with ONLY the JSON object — no markdown, no code fences, no explanation. "
+                    f"Previous response:\n\n{raw[:2000]}"
+                ),
+                tools=[],
+                sse_queue=None,
+            )
+    log.error("%s: JSON parse failed after %d retries. Raw: %s", stage_name, max_retries, raw[:300])
+    return {"error": f"Failed to parse {stage_name} response after {max_retries} retries", "raw": raw[:500]}
+
+
 async def run_signals_stage(sse_queue: asyncio.Queue | None = None) -> dict:
     """Tab 1: Morning Scout — fetch and rank signals."""
     if sse_queue:
@@ -392,16 +443,7 @@ async def run_signals_stage(sse_queue: asyncio.Queue | None = None) -> dict:
         sse_queue=sse_queue,
     )
 
-    try:
-        # Claude may wrap JSON in code fences — strip them
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("```")[1]
-            if cleaned.startswith("json"):
-                cleaned = cleaned[4:]
-        result = json.loads(cleaned.strip())
-    except json.JSONDecodeError:
-        result = {"error": "Failed to parse signals response", "raw": raw[:500]}
+    result = await _parse_with_retry(raw, SIGNAL_MONITORING_SKILL, "signals", sse_queue)
 
     pipeline_state["signals"] = result
     if sse_queue:
@@ -447,15 +489,7 @@ async def run_contacts_stage(
         sse_queue=sse_queue,
     )
 
-    try:
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("```")[1]
-            if cleaned.startswith("json"):
-                cleaned = cleaned[4:]
-        result = json.loads(cleaned.strip())
-    except json.JSONDecodeError:
-        result = {"error": "Failed to parse contacts response", "raw": raw[:500]}
+    result = await _parse_with_retry(raw, LEAD_SOURCING_SKILL, "contacts", sse_queue)
 
     pipeline_state["contacts"] = result
     if sse_queue:
@@ -519,15 +553,7 @@ async def run_emails_stage(
         sse_queue=sse_queue,
     )
 
-    try:
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("```")[1]
-            if cleaned.startswith("json"):
-                cleaned = cleaned[4:]
-        result = json.loads(cleaned.strip())
-    except json.JSONDecodeError:
-        result = {"error": "Failed to parse emails response", "raw": raw[:500]}
+    result = await _parse_with_retry(raw, EMAIL_COPYWRITE_SKILL, "emails", sse_queue)
 
     pipeline_state["emails"] = result
     if sse_queue:

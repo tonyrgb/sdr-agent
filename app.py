@@ -63,6 +63,7 @@ def _verify_password(submitted: str) -> bool:
 # ---------------------------------------------------------------------------
 pipeline_state: dict[str, Any] = {
     "signals": None,
+    "approved_signals": None,
     "contacts": None,
     "emails": None,
     "last_run": None,
@@ -452,24 +453,35 @@ async def run_signals_stage(sse_queue: asyncio.Queue | None = None) -> dict:
 
 
 async def run_contacts_stage(
-    signals: dict,
+    signals: dict | list,
     sse_queue: asyncio.Queue | None = None,
 ) -> dict:
     """Tab 2: Coordinator — source and rank contacts per signal."""
     if sse_queue:
         await sse_queue.put({"type": "stage", "stage": "contacts", "status": "running"})
 
-    # Flatten top signals for the prompt
+    # Build signal list — accepts either approved flat list or full {topics:[]} structure
     signal_list = []
-    for topic in signals.get("topics", []):
-        for sig in topic.get("signals", [])[:5]:
+    if isinstance(signals, list):
+        for sig in signals:
             signal_list.append({
                 "id":      sig.get("id", ""),
                 "title":   sig.get("title", ""),
                 "company": sig.get("company", ""),
                 "topic":   sig.get("topicName", ""),
                 "summary": sig.get("summary", ""),
+                "owner":   sig.get("owner", ""),
             })
+    else:
+        for topic in signals.get("topics", []):
+            for sig in topic.get("signals", [])[:5]:
+                signal_list.append({
+                    "id":      sig.get("id", ""),
+                    "title":   sig.get("title", ""),
+                    "company": sig.get("company", ""),
+                    "topic":   sig.get("topicName", ""),
+                    "summary": sig.get("summary", ""),
+                })
 
     if not signal_list:
         result = {"signals": [], "error": "No signals to source contacts for"}
@@ -501,6 +513,7 @@ async def run_emails_stage(
     signals: dict,
     contacts: dict,
     sse_queue: asyncio.Queue | None = None,
+    approved_contacts: list | None = None,
 ) -> dict:
     """Tab 3: Email Campaigns — generate 3-touch sequences."""
     if sse_queue:
@@ -508,22 +521,25 @@ async def run_emails_stage(
 
     # Build signal context map
     signal_map: dict[str, dict] = {}
-    for topic in signals.get("topics", []):
-        for sig in topic.get("signals", [])[:5]:
-            signal_map[sig.get("id", "")] = sig
+    if isinstance(signals, list):
+        for sig in signals:
+            signal_map[str(sig.get("id", ""))] = sig
+    else:
+        for topic in signals.get("topics", []):
+            for sig in topic.get("signals", [])[:5]:
+                signal_map[str(sig.get("id", ""))] = sig
 
-    # Build prompt payload
+    # Build campaign inputs from approved contacts (if provided) or full contacts result
     campaign_inputs = []
-    for sig_entry in contacts.get("signals", []):
-        sig_id    = sig_entry.get("signalId", "")
-        sig_ctx   = signal_map.get(sig_id, {})
-        top_contacts = sig_entry.get("contacts", [])[:5]
-
-        for contact in top_contacts:
+    if approved_contacts:
+        for entry in approved_contacts:
+            sig_id  = str(entry.get("signalId", ""))
+            sig_ctx = signal_map.get(sig_id, {})
+            contact = entry.get("contact", {})
             campaign_inputs.append({
-                "signalId":    sig_id,
-                "signalTitle": sig_entry.get("signalTitle", ""),
-                "company":     sig_entry.get("company", ""),
+                "signalId":      sig_id,
+                "signalTitle":   entry.get("signalTitle", ""),
+                "company":       entry.get("company", ""),
                 "signalSummary": sig_ctx.get("summary", ""),
                 "outreachHook":  sig_ctx.get("outreachHook", ""),
                 "intentScore":   sig_ctx.get("intentScore", ""),
@@ -534,6 +550,25 @@ async def run_emails_stage(
                     "email":     contact.get("email", ""),
                 },
             })
+    else:
+        for sig_entry in contacts.get("signals", []):
+            sig_id    = str(sig_entry.get("signalId", ""))
+            sig_ctx   = signal_map.get(sig_id, {})
+            for contact in sig_entry.get("contacts", [])[:5]:
+                campaign_inputs.append({
+                    "signalId":      sig_id,
+                    "signalTitle":   sig_entry.get("signalTitle", ""),
+                    "company":       sig_entry.get("company", ""),
+                    "signalSummary": sig_ctx.get("summary", ""),
+                    "outreachHook":  sig_ctx.get("outreachHook", ""),
+                    "intentScore":   sig_ctx.get("intentScore", ""),
+                    "contact": {
+                        "firstName": contact.get("firstName", ""),
+                        "lastName":  contact.get("lastName", ""),
+                        "title":     contact.get("title", ""),
+                        "email":     contact.get("email", ""),
+                    },
+                })
 
     if not campaign_inputs:
         result = {"campaigns": [], "error": "No contacts to generate emails for"}
@@ -723,17 +758,30 @@ async def api_run_signals():
 
 
 @app.post("/api/contacts/run")
-async def api_run_contacts():
-    if not pipeline_state["signals"]:
-        raise HTTPException(400, "No signals available. Run signals stage first.")
+async def api_run_contacts(request: Request):
     if not ANTHROPIC_API_KEY:
         raise HTTPException(400, "ANTHROPIC_API_KEY not configured")
+
+    body: dict = {}
+    try:
+        if request.headers.get("content-type", "").startswith("application/json"):
+            body = await request.json()
+    except Exception:
+        pass
+
+    approved_signals = body.get("approvedSignals")
+    signals_input = approved_signals or pipeline_state.get("signals")
+    if not signals_input:
+        raise HTTPException(400, "No signals available. Run Scout and approve signals first.")
+
+    if approved_signals:
+        pipeline_state["approved_signals"] = approved_signals
 
     queue: asyncio.Queue = asyncio.Queue()
 
     async def run():
         try:
-            await run_contacts_stage(pipeline_state["signals"], queue)
+            await run_contacts_stage(signals_input, queue)
         except Exception as e:
             await queue.put({"type": "error", "stage": "contacts", "message": str(e)})
         finally:
@@ -749,17 +797,29 @@ async def api_run_contacts():
 
 
 @app.post("/api/emails/run")
-async def api_run_emails():
-    if not pipeline_state["contacts"]:
-        raise HTTPException(400, "No contacts available. Run contacts stage first.")
+async def api_run_emails(request: Request):
     if not ANTHROPIC_API_KEY:
         raise HTTPException(400, "ANTHROPIC_API_KEY not configured")
+
+    body: dict = {}
+    try:
+        if request.headers.get("content-type", "").startswith("application/json"):
+            body = await request.json()
+    except Exception:
+        pass
+
+    approved_contacts = body.get("approvedContacts")
+    if not approved_contacts and not pipeline_state.get("contacts"):
+        raise HTTPException(400, "No contacts available. Run Greeter and approve contacts first.")
+
+    signals_src  = pipeline_state.get("approved_signals") or pipeline_state.get("signals") or {}
+    contacts_src = pipeline_state.get("contacts") or {}
 
     queue: asyncio.Queue = asyncio.Queue()
 
     async def run():
         try:
-            await run_emails_stage(pipeline_state["signals"], pipeline_state["contacts"], queue)
+            await run_emails_stage(signals_src, contacts_src, queue, approved_contacts=approved_contacts)
         except Exception as e:
             await queue.put({"type": "error", "stage": "emails", "message": str(e)})
         finally:
@@ -847,7 +907,7 @@ async def api_get_state():
 
 @app.delete("/api/state")
 async def api_clear_state():
-    pipeline_state.update({"signals": None, "contacts": None, "emails": None})
+    pipeline_state.update({"signals": None, "approved_signals": None, "contacts": None, "emails": None})
     return {"cleared": True}
 
 

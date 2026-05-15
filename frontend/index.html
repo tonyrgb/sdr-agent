@@ -78,6 +78,16 @@
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #0f172a; }
     ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+    .signal-checkbox { width: 16px; height: 16px; accent-color: var(--brand); cursor: pointer; flex-shrink: 0; margin-top: 2px; }
+    .owner-select { padding: 3px 7px; font-size: 12px; min-width: 112px; }
+    .card.declined-card { opacity: 0.38; }
+    .approval-bar { background: #0c1a2c; border: 1px solid #1e3a5f; border-radius: 8px; padding: 10px 16px; margin-bottom: 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .approval-footer { background: #0c1628; border-top: 1px solid #1e3a5f; padding: 12px 0 4px; margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; bottom: 0; }
+    .approved-banner { background: #0d2217; border: 1px solid #166534; border-radius: 8px; padding: 10px 16px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .contact-cb { width: 15px; height: 15px; accent-color: var(--brand); cursor: pointer; flex-shrink: 0; }
+    .contact-approval-footer { background: #0c1628; border-top: 1px solid #1e3a5f; padding: 12px 16px; margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; bottom: 0; }
+    .approved-contacts-banner { background: #0d2217; border: 1px solid #166534; border-radius: 8px; padding: 10px 16px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; }
   </style>
 </head>
 <body class="min-h-full">
@@ -105,6 +115,9 @@
     <div class="text-xs text-slate-500 hidden md:block" id="next-run-label">
       Next: <span id="next-run-text" class="text-slate-400">loading…</span>
     </div>
+
+    <!-- Pipeline guard message -->
+    <span id="pipeline-guard-msg" class="hidden text-xs text-amber-400 max-w-xs text-right">No approved signals — review Scout results first.</span>
 
     <!-- Run Pipeline button -->
     <button class="run-btn" id="run-pipeline-btn" onclick="runPipeline()">
@@ -192,11 +205,38 @@
     <div class="text-red-300 text-sm" id="signals-error-text"></div>
   </div>
 
+  <!-- Approval confirmed banner (shown after Send to Greeter) -->
+  <div id="signals-approved-banner" class="hidden approved-banner">
+    <div class="flex items-center gap-3">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      <span class="text-green-300 text-sm font-semibold" id="signals-approved-text"></span>
+    </div>
+    <button class="text-xs text-slate-500 hover:text-slate-300" onclick="resetSignalApproval()">Re-review</button>
+  </div>
+
   <!-- Topic filter tabs -->
   <div id="signals-topic-bar" class="hidden flex flex-wrap gap-2 mb-5"></div>
 
+  <!-- Select-all / count bar (approval mode) -->
+  <div id="signals-approval-bar" class="hidden approval-bar">
+    <span class="text-xs text-slate-400 font-semibold">Review &amp; assign signals</span>
+    <div class="flex items-center gap-2 ml-auto">
+      <button class="text-xs text-slate-400 hover:text-slate-200" onclick="setAllSignals(true)">Select All</button>
+      <span class="text-slate-700">·</span>
+      <button class="text-xs text-slate-400 hover:text-slate-200" onclick="setAllSignals(false)">Deselect All</button>
+    </div>
+  </div>
+
   <!-- Results -->
   <div id="signals-results" class="hidden"></div>
+
+  <!-- Send-to-Greeter footer (approval mode) -->
+  <div id="signals-approval-footer" class="hidden approval-footer">
+    <span class="text-xs text-slate-400" id="signals-selected-count"></span>
+    <button class="run-btn" style="padding:8px 20px;font-size:13px;" onclick="approveSignals()">
+      Send to Greeter →
+    </button>
+  </div>
 </div>
 
 <!-- ======================================================================
@@ -227,7 +267,24 @@
     <div class="text-red-300 text-sm" id="contacts-error-text"></div>
   </div>
 
+  <!-- Approval confirmed banner -->
+  <div id="contacts-approved-banner" class="hidden approved-contacts-banner">
+    <div class="flex items-center gap-3">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      <span class="text-green-300 text-sm font-semibold" id="contacts-approved-text"></span>
+    </div>
+    <button class="text-xs text-slate-500 hover:text-slate-300" onclick="resetContactApproval()">Re-review</button>
+  </div>
+
   <div id="contacts-results" class="hidden space-y-6"></div>
+
+  <!-- Send-to-Messenger footer -->
+  <div id="contacts-approval-footer" class="hidden contact-approval-footer">
+    <span class="text-xs text-slate-400" id="contacts-selected-count"></span>
+    <button class="run-btn" style="padding:8px 20px;font-size:13px;" onclick="approveContacts()">
+      Send to Messenger →
+    </button>
+  </div>
 </div>
 
 <!-- ======================================================================
@@ -276,7 +333,9 @@
 // =========================================================================
 const state = {
   signals: null,
+  approvedSignals: [],
   contacts: null,
+  approvedContacts: [],
   emails: null,
   running: false,
   activeTab: 'signals',
@@ -358,8 +417,13 @@ function setHeaderStatus(text, dotClass) {
 // =========================================================================
 // SSE stream helper
 // =========================================================================
-async function streamSSE(url, method, onEvent) {
-  const resp = await fetch(url, { method });
+async function streamSSE(url, method, onEvent, body = null) {
+  const opts = { method };
+  if (body) {
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(body);
+  }
+  const resp = await fetch(url, opts);
   if (!resp.ok) {
     const err = await resp.text();
     throw new Error(`${resp.status}: ${err}`);
@@ -428,7 +492,10 @@ async function runSignals() {
 // Run Contacts (Tab 2)
 // =========================================================================
 async function runContacts() {
-  if (!state.signals) { alert('Run Morning Scout first.'); return; }
+  if (!state.approvedSignals.length) {
+    alert('No approved signals. Approve signals in Morning Scout first.');
+    return;
+  }
   setDot('contacts', 'running');
   setHeaderStatus('Sourcing contacts…', 'running');
   showLoading('contacts', 'Searching HubSpot and Apollo…');
@@ -449,16 +516,17 @@ async function runContacts() {
 
       if (event.type === 'stage' && event.status === 'done') {
         state.contacts = event.data;
+        state.approvedContacts = [];
         renderContacts(event.data);
         setDot('contacts', 'done');
-        setHeaderStatus('Contacts sourced', 'done');
+        setHeaderStatus('Contacts sourced — review &amp; approve', 'done');
       }
 
       if (event.type === 'error') {
         showError('contacts', event.message);
         setDot('contacts', 'error');
       }
-    });
+    }, { approvedSignals: state.approvedSignals });
   } catch (e) {
     showError('contacts', e.message);
     setDot('contacts', 'error');
@@ -472,7 +540,10 @@ async function runContacts() {
 // Run Emails (Tab 3)
 // =========================================================================
 async function runEmails() {
-  if (!state.contacts) { alert('Run Coordinator first.'); return; }
+  if (!state.approvedContacts.length) {
+    alert('No approved contacts. Approve contacts in The Greeter first.');
+    return;
+  }
   setDot('emails', 'running');
   setHeaderStatus('Generating emails…', 'running');
   showLoading('emails', 'Writing personalized email sequences…');
@@ -493,7 +564,7 @@ async function runEmails() {
         showError('emails', event.message);
         setDot('emails', 'error');
       }
-    });
+    }, { approvedContacts: state.approvedContacts });
   } catch (e) {
     showError('emails', e.message);
     setDot('emails', 'error');
@@ -507,57 +578,84 @@ async function runEmails() {
 // Run full pipeline
 // =========================================================================
 async function runPipeline() {
+  if (!state.approvedSignals.length) {
+    document.getElementById('pipeline-guard-msg').classList.remove('hidden');
+    return;
+  }
   if (state.running) return;
   state.running = true;
+
   const btn = document.getElementById('run-pipeline-btn');
   btn.disabled = true;
   btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px"></div> Running…';
 
-  setDot('signals',  'pending');
   setDot('contacts', 'pending');
   setDot('emails',   'pending');
   setHeaderStatus('Running pipeline…', 'running');
-
-  // Pre-show loading on first tab
-  showTab('signals', document.querySelector('.tab-btn'));
-  showLoading('signals', 'Starting pipeline…');
+  showTab('contacts', document.querySelectorAll('.tab-btn')[1]);
+  showLoading('contacts', 'Sourcing contacts…');
 
   try {
-    await streamSSE('/api/pipeline/run', 'POST', (event) => {
+    // Stage 2: contacts with approved signals
+    await streamSSE('/api/contacts/run', 'POST', (event) => {
       addLog(event);
-
-      if (event.type === 'stage') {
-        const { stage, status, data } = event;
-
-        if (status === 'running') {
-          setDot(stage, 'running');
-          if (stage === 'signals')  { showLoading('signals',  'Querying Prius Signals…'); }
-          if (stage === 'contacts') { hideLoading('signals'); showLoading('contacts', 'Sourcing contacts…'); }
-          if (stage === 'emails')   { hideLoading('contacts'); showLoading('emails', 'Writing emails…'); }
-        }
-
-        if (status === 'done') {
-          setDot(stage, 'done');
-          hideLoading(stage);
-          if (stage === 'signals'  && data) { state.signals  = data; renderSignals(data);   }
-          if (stage === 'contacts' && data) { state.contacts = data; renderContacts(data); }
-          if (stage === 'emails'   && data) { state.emails   = data; renderEmails(data);   }
-        }
+      if (event.type === 'tool_call' && event.tool === 'search_crm_objects') {
+        document.getElementById('contacts-loading-text').textContent =
+          `Searching HubSpot for ${event.params?.filterGroups?.[0]?.filters?.[0]?.value || '…'}`;
       }
-
-      if (event.type === 'pipeline_complete') {
-        setHeaderStatus('Pipeline complete · ' + new Date().toLocaleTimeString(), 'done');
-        // Switch to emails tab
-        showTab('emails', document.querySelectorAll('.tab-btn')[2]);
+      if (event.type === 'tool_call' && event.tool.includes('apollo')) {
+        document.getElementById('contacts-loading-text').textContent =
+          `Searching Apollo for ${event.params?.q_organization_name || '…'}`;
       }
-
-      if (event.type === 'pipeline_error') {
-        const stage = event.stage || 'pipeline';
-        showError(stage, event.message);
-        setDot(stage, 'error');
-        setHeaderStatus('Pipeline error', 'error');
+      if (event.type === 'stage' && event.status === 'done') {
+        state.contacts = event.data;
+        state.approvedContacts = [];
+        renderContacts(event.data);
+        setDot('contacts', 'done');
+        hideLoading('contacts');
       }
+      if (event.type === 'error') { showError('contacts', event.message); setDot('contacts', 'error'); }
+    }, { approvedSignals: state.approvedSignals });
+
+    if (!state.contacts || state.contacts.error) {
+      setHeaderStatus('Pipeline stopped — review contacts', 'error');
+      return;
+    }
+
+    // Auto-approve all contacts for pipeline run (user can re-review per tab)
+    const allContacts = [];
+    (state.contacts.signals || []).forEach(sig => {
+      (sig.contacts || []).forEach(c => {
+        allContacts.push({
+          signalId: sig.signalId, signalTitle: sig.signalTitle, company: sig.company,
+          contact: { firstName: c.firstName, lastName: c.lastName, title: c.title, email: c.email || null, phone: c.phone || null },
+        });
+      });
     });
+    state.approvedContacts = allContacts;
+
+    // Show approval banners for both stages
+    document.getElementById('contacts-approval-footer').classList.add('hidden');
+    document.getElementById('contacts-approved-banner').classList.remove('hidden');
+    document.getElementById('contacts-approved-text').textContent =
+      `${allContacts.length} contacts auto-approved for pipeline — re-review in Greeter tab`;
+
+    showLoading('emails', 'Writing personalized email sequences…');
+    showTab('emails', document.querySelectorAll('.tab-btn')[2]);
+
+    // Stage 3: emails with approved contacts
+    await streamSSE('/api/emails/run', 'POST', (event) => {
+      addLog(event);
+      if (event.type === 'stage' && event.status === 'done') {
+        state.emails = event.data;
+        renderEmails(event.data);
+        setDot('emails', 'done');
+        hideLoading('emails');
+        setHeaderStatus('Pipeline complete · ' + new Date().toLocaleTimeString(), 'done');
+      }
+      if (event.type === 'error') { showError('emails', event.message); setDot('emails', 'error'); }
+    }, { approvedContacts: state.approvedContacts });
+
   } catch (e) {
     setHeaderStatus('Pipeline error', 'error');
     addLog({ type: 'error', message: e.message });
@@ -565,7 +663,7 @@ async function runPipeline() {
     state.running = false;
     btn.disabled = false;
     btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run Pipeline';
-    ['signals','contacts','emails'].forEach(s => hideLoading(s));
+    ['contacts','emails'].forEach(s => hideLoading(s));
   }
 }
 
@@ -623,6 +721,86 @@ function renderSignalList(topics) {
     </div>
     ${(topic.signals || []).map(sig => renderSignalCard(sig)).join('')}
   `;
+
+  // Show approval controls if not yet approved
+  if (!state.approvedSignals.length) {
+    document.getElementById('signals-approval-bar').classList.remove('hidden');
+    document.getElementById('signals-approval-footer').classList.remove('hidden');
+    updateSignalSelectedCount();
+    // Wire checkbox change handlers
+    container.querySelectorAll('.signal-checkbox').forEach(cb => {
+      cb.addEventListener('change', updateSignalSelectedCount);
+    });
+  }
+}
+
+function updateSignalSelectedCount() {
+  const total = document.querySelectorAll('.signal-checkbox').length;
+  const checked = document.querySelectorAll('.signal-checkbox:checked').length;
+  document.getElementById('signals-selected-count').textContent = `${checked} of ${total} selected`;
+}
+
+function setAllSignals(checked) {
+  document.querySelectorAll('.signal-checkbox').forEach(cb => { cb.checked = checked; });
+  document.querySelectorAll('.signal-card-wrap').forEach(el => {
+    el.classList.toggle('declined-card', !checked);
+  });
+  updateSignalSelectedCount();
+}
+
+function approveSignals() {
+  const approved = [];
+  document.querySelectorAll('.signal-card-wrap').forEach(el => {
+    const cb = el.querySelector('.signal-checkbox');
+    if (!cb || !cb.checked) return;
+    const sigId = el.dataset.signalId;
+    const owner = el.querySelector('.owner-select')?.value || 'Unassigned';
+    // Find signal in all topics
+    const topics = Array.isArray(state.signals) ? state.signals : (state.signals?.topics || []);
+    for (const t of topics) {
+      const sig = (t.signals || []).find(s => String(s.id) === sigId);
+      if (sig) { approved.push({ ...sig, owner }); break; }
+    }
+  });
+
+  if (!approved.length) {
+    alert('Select at least one signal to send to Greeter.');
+    return;
+  }
+
+  state.approvedSignals = approved;
+  updatePipelineGuard();
+
+  // Hide approval controls, show banner
+  document.getElementById('signals-approval-bar').classList.add('hidden');
+  document.getElementById('signals-approval-footer').classList.add('hidden');
+  const banner = document.getElementById('signals-approved-banner');
+  banner.classList.remove('hidden');
+  document.getElementById('signals-approved-text').textContent =
+    `${approved.length} signal${approved.length !== 1 ? 's' : ''} approved — ready for Greeter`;
+}
+
+function resetSignalApproval() {
+  state.approvedSignals = [];
+  updatePipelineGuard();
+  document.getElementById('signals-approved-banner').classList.add('hidden');
+  // Re-show approval controls
+  if (state.signals) {
+    const topics = Array.isArray(state.signals) ? state.signals : (state.signals?.topics || []);
+    if (topics.length) {
+      document.getElementById('signals-approval-bar').classList.remove('hidden');
+      document.getElementById('signals-approval-footer').classList.remove('hidden');
+      updateSignalSelectedCount();
+    }
+  }
+}
+
+function updatePipelineGuard() {
+  const hasApproved = state.approvedSignals.length > 0;
+  const btn = document.getElementById('run-pipeline-btn');
+  const msg = document.getElementById('pipeline-guard-msg');
+  btn.disabled = !hasApproved;
+  msg.classList.toggle('hidden', hasApproved);
 }
 
 function intentBadge(score) {
@@ -632,9 +810,11 @@ function intentBadge(score) {
 
 function renderSignalCard(sig) {
   return `
-    <div class="card mb-4">
-      <div class="card-header flex items-start justify-between">
-        <div class="flex-1 min-w-0 pr-4">
+    <div class="card mb-4 signal-card-wrap" data-signal-id="${esc(String(sig.id || ''))}">
+      <div class="card-header flex items-start gap-3">
+        <input type="checkbox" class="signal-checkbox" checked
+          onchange="this.closest('.signal-card-wrap').classList.toggle('declined-card', !this.checked); updateSignalSelectedCount();" />
+        <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
             <span class="text-white font-semibold text-sm leading-snug">${esc(sig.title)}</span>
             ${intentBadge(sig.intentScore)}
@@ -649,7 +829,14 @@ function renderSignalCard(sig) {
             ${sig.source ? `<span>·</span><span>${esc(sig.source)}</span>` : ''}
           </div>
         </div>
-        <div class="text-slate-600 text-xs whitespace-nowrap font-mono">#${sig.rank}</div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <select class="owner-select" title="Assign owner">
+            <option value="">Unassigned</option>
+            <option value="Tony">Tony</option>
+            <option value="Jared">Jared</option>
+          </select>
+          <span class="text-slate-600 text-xs font-mono">#${sig.rank}</span>
+        </div>
       </div>
       <div class="p-4">
         <p class="text-slate-300 text-sm leading-relaxed mb-3">${esc(sig.summary)}</p>
@@ -676,8 +863,8 @@ function renderContacts(data) {
     return;
   }
 
-  container.innerHTML = signals.map(sig => `
-    <div class="card">
+  container.innerHTML = signals.map((sig, si) => `
+    <div class="card" data-signal-id="${esc(String(sig.signalId || si))}">
       <div class="card-header flex items-center justify-between">
         <div>
           <div class="text-white font-semibold text-sm">${esc(sig.signalTitle || sig.company)}</div>
@@ -695,6 +882,7 @@ function renderContacts(data) {
         <table class="contact-table w-full">
           <thead>
             <tr class="text-left" style="background:#162032;">
+              <th style="width:32px;"></th>
               <th>#</th>
               <th>First Name</th>
               <th>Last Name</th>
@@ -705,8 +893,14 @@ function renderContacts(data) {
             </tr>
           </thead>
           <tbody>
-            ${(sig.contacts || []).map(c => `
+            ${(sig.contacts || []).map((c, ci) => `
               <tr>
+                <td>
+                  <input type="checkbox" class="contact-cb"
+                    data-signal-idx="${si}" data-contact-idx="${ci}"
+                    checked
+                    onchange="updateContactSelectedCount()" />
+                </td>
                 <td class="text-slate-600">${c.rank}</td>
                 <td class="text-slate-200 font-medium">${esc(c.firstName)}</td>
                 <td class="text-slate-200">${esc(c.lastName)}</td>
@@ -730,6 +924,65 @@ function renderContacts(data) {
 
   container.classList.remove('hidden');
   document.getElementById('contacts-empty').classList.add('hidden');
+
+  // Show approval footer if not yet approved
+  if (!state.approvedContacts.length) {
+    document.getElementById('contacts-approval-footer').classList.remove('hidden');
+    updateContactSelectedCount();
+  }
+}
+
+function updateContactSelectedCount() {
+  const total   = document.querySelectorAll('.contact-cb').length;
+  const checked = document.querySelectorAll('.contact-cb:checked').length;
+  document.getElementById('contacts-selected-count').textContent = `${checked} of ${total} contacts selected`;
+}
+
+function approveContacts() {
+  const approved = [];
+  const signals = state.contacts?.signals || [];
+  document.querySelectorAll('.contact-cb:checked').forEach(cb => {
+    const si = parseInt(cb.dataset.signalIdx);
+    const ci = parseInt(cb.dataset.contactIdx);
+    const sig = signals[si];
+    const contact = sig?.contacts?.[ci];
+    if (sig && contact) {
+      approved.push({
+        signalId:    sig.signalId,
+        signalTitle: sig.signalTitle,
+        company:     sig.company,
+        contact: {
+          firstName: contact.firstName,
+          lastName:  contact.lastName,
+          title:     contact.title,
+          email:     contact.email || null,
+          phone:     contact.phone || null,
+        },
+      });
+    }
+  });
+
+  if (!approved.length) {
+    alert('Select at least one contact to send to Messenger.');
+    return;
+  }
+
+  state.approvedContacts = approved;
+
+  document.getElementById('contacts-approval-footer').classList.add('hidden');
+  const banner = document.getElementById('contacts-approved-banner');
+  banner.classList.remove('hidden');
+  document.getElementById('contacts-approved-text').textContent =
+    `${approved.length} contact${approved.length !== 1 ? 's' : ''} approved — ready for Messenger`;
+}
+
+function resetContactApproval() {
+  state.approvedContacts = [];
+  document.getElementById('contacts-approved-banner').classList.add('hidden');
+  if (state.contacts) {
+    document.getElementById('contacts-approval-footer').classList.remove('hidden');
+    updateContactSelectedCount();
+  }
 }
 
 // =========================================================================
@@ -914,6 +1167,8 @@ function showError(stage, msg) {
 function clearState() {
   fetch('/api/state', { method: 'DELETE' }).then(() => {
     state.signals = state.contacts = state.emails = null;
+    state.approvedSignals = [];
+    state.approvedContacts = [];
     ['signals', 'contacts', 'emails'].forEach(s => {
       setDot(s, 'pending');
       hideLoading(s);
@@ -925,7 +1180,13 @@ function clearState() {
       if (errorEl)   errorEl.classList.add('hidden');
     });
     document.getElementById('signals-topic-bar').classList.add('hidden');
+    document.getElementById('signals-approval-bar').classList.add('hidden');
+    document.getElementById('signals-approval-footer').classList.add('hidden');
+    document.getElementById('signals-approved-banner').classList.add('hidden');
+    document.getElementById('contacts-approval-footer').classList.add('hidden');
+    document.getElementById('contacts-approved-banner').classList.add('hidden');
     document.getElementById('emails-signal-bar').classList.add('hidden');
+    updatePipelineGuard();
     setHeaderStatus('Idle', 'pending');
     document.getElementById('log-entries').innerHTML = '';
   });
@@ -977,6 +1238,7 @@ async function loadState() {
   }
 }
 
+updatePipelineGuard();
 loadState();
 </script>
 </body>

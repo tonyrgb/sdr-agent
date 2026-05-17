@@ -40,6 +40,7 @@ PRIUS_SIGNALS_BASE_URL  = os.getenv("PRIUS_SIGNALS_BASE_URL", "https://signals.p
 PRIUS_SIGNALS_TOKEN     = os.getenv("PRIUS_SIGNALS_TOKEN", "")
 HUBSPOT_TOKEN           = os.getenv("HUBSPOT_TOKEN", "")
 APOLLO_API_KEY          = os.getenv("APOLLO_API_KEY", "")
+print(f"DEBUG APOLLO KEY: '{APOLLO_API_KEY[:5]}...'")
 MODEL                   = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
 MAX_TOKENS              = 8096
 
@@ -255,13 +256,14 @@ async def execute_hubspot_search(params: dict) -> dict:
 
 async def execute_apollo_people_search(params: dict) -> dict:
     """Call Apollo.io people search API."""
-    url = "https://api.apollo.io/api/v1/mixed_people/search"
+    url = "https://api.apollo.io/api/v1/mixed_people/api_search"
     headers = {
         "x-api-key":    APOLLO_API_KEY,
         "Content-Type": "application/json",
     }
 
     payload = {
+        "api_key":             APOLLO_API_KEY,
         "q_organization_name": params.get("q_organization_name", ""),
         "person_titles":       params.get("person_titles", []),
         "page":                params.get("page", 1),

@@ -294,7 +294,7 @@
   <div class="flex items-center justify-between mb-5">
     <div>
       <h2 class="text-white font-bold text-xl">The Messenger</h2>
-      <p class="text-slate-500 text-sm mt-1">3-touch sequences per contact · Touch 1 signal-anchored · Touch 2 credibility · Touch 3 break-up</p>
+      <p class="text-slate-500 text-sm mt-1">3-touch sequences per signal · Contacts shown on each card · Personalization tokens applied at send time</p>
     </div>
     <div class="flex gap-3">
       <button class="copy-btn" onclick="exportAllEmails()">Export All CSV</button>
@@ -1028,67 +1028,77 @@ function renderEmails(data) {
     return;
   }
 
-  // Group by signal
-  const bySignal = {};
-  campaigns.forEach(c => {
-    const key = c.signalId || c.signalTitle || 'Unknown';
-    if (!bySignal[key]) bySignal[key] = { title: c.signalTitle, company: c.company, campaigns: [] };
-    bySignal[key].campaigns.push(c);
-  });
+  // One campaign per signal — key by index-stable signalId
+  const firstKey = String(campaigns[0].signalId || 0);
+  if (!state.activeEmailSignal || !campaigns.some((c, i) => String(c.signalId || i) === state.activeEmailSignal)) {
+    state.activeEmailSignal = firstKey;
+  }
 
-  const signalKeys = Object.keys(bySignal);
-  state.activeEmailSignal = state.activeEmailSignal || signalKeys[0];
-
-  // Signal filter bar
+  // Signal filter bar — one tab per campaign
   bar.innerHTML = '';
   bar.classList.remove('hidden');
-  signalKeys.forEach(key => {
+  campaigns.forEach((campaign, idx) => {
+    const key = String(campaign.signalId || idx);
+    const contactCount = (campaign.contacts || []).length;
     const btn = document.createElement('button');
     btn.className = 'topic-tab' + (key === state.activeEmailSignal ? ' active' : '');
-    const count = bySignal[key].campaigns.length;
-    btn.textContent = `${bySignal[key].company || key} (${count})`;
+    btn.textContent = `${campaign.company || campaign.signalTitle || key} (${contactCount})`;
     btn.onclick = () => {
       state.activeEmailSignal = key;
       document.querySelectorAll('#emails-signal-bar .topic-tab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      renderEmailList(bySignal);
+      renderEmailCampaign();
     };
     bar.appendChild(btn);
   });
 
-  renderEmailList(bySignal);
+  renderEmailCampaign();
 
   container.classList.remove('hidden');
   document.getElementById('emails-empty').classList.add('hidden');
 }
 
-function renderEmailList(bySignal) {
+function renderEmailCampaign() {
+  const campaigns = state.emails?.campaigns || [];
   const container = document.getElementById('emails-results');
-  const key = state.activeEmailSignal || Object.keys(bySignal)[0];
-  const group = bySignal[key];
-  if (!group) return;
+  const campaign = campaigns.find((c, idx) => String(c.signalId || idx) === state.activeEmailSignal) || campaigns[0];
+  if (!campaign) return;
 
   const touchColors = { 1: '#1e3a5f', 2: '#1a2f1a', 3: '#3d1a1a' };
-  const touchLabels  = { 1: 'Touch 1 — Signal Outreach', 2: 'Touch 2 — Credibility', 3: 'Touch 3 — Break-up' };
-  const touchBadges  = { 1: 'badge-good', 2: 'badge-us', 3: 'badge-late' };
+  const touchLabels = { 1: 'Touch 1 — Signal Outreach', 2: 'Touch 2 — Credibility', 3: 'Touch 3 — Break-up' };
+  const touchBadges = { 1: 'badge-good', 2: 'badge-us', 3: 'badge-late' };
+  const contacts = campaign.contacts || [];
+  const campKey = esc(String(campaign.signalId || state.activeEmailSignal || ''));
 
-  container.innerHTML = group.campaigns.map(campaign => `
+  container.innerHTML = `
     <div class="card mb-6">
       <div class="card-header">
         <div class="flex items-center justify-between">
           <div>
-            <div class="text-white font-semibold text-sm">${esc(campaign.contact?.firstName)} ${esc(campaign.contact?.lastName)}</div>
+            <div class="text-white font-semibold text-sm">${esc(campaign.signalTitle || campaign.company)}</div>
             <div class="text-xs text-slate-500 mt-0.5">
-              <span class="text-slate-400">${esc(campaign.contact?.title || '')}</span>
-              ${campaign.contact?.email ? ` · <span class="font-mono text-sky-400">${esc(campaign.contact.email)}</span>` : ''}
+              <span class="text-sky-400 font-medium">${esc(campaign.company)}</span>
+              <span class="ml-2 text-slate-600">${contacts.length} contact${contacts.length !== 1 ? 's' : ''}</span>
             </div>
           </div>
-          <div class="flex gap-2">
-            <button class="copy-btn" onclick="copyAllEmails(this, '${campaign.signalId}_${campaign.contact?.email || campaign.contact?.firstName}')">Copy All 3</button>
+          <button class="copy-btn" onclick="copyAllEmails(this, '${campKey}')">Copy All 3</button>
+        </div>
+      </div>
+
+      ${contacts.length ? `
+        <div style="border-bottom: 1px solid #334155; padding: 12px 16px;">
+          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Contacts (${contacts.length})</div>
+          <div class="flex flex-wrap gap-2">
+            ${contacts.map(c => `
+              <div style="background:#0f2339; border:1px solid #1e3a5f; border-radius:6px; padding:6px 10px; min-width:140px;">
+                <div class="text-slate-200 text-xs font-medium">${esc(c.firstName)} ${esc(c.lastName)}</div>
+                <div class="text-slate-500 text-xs mt-0.5">${esc(c.title || '—')}</div>
+                ${c.email ? `<div class="font-mono text-xs text-sky-400 mt-0.5">${esc(c.email)}</div>` : ''}
+              </div>
+            `).join('')}
           </div>
         </div>
-        <div class="text-xs text-slate-600 mt-2">Signal: ${esc(campaign.signalTitle || '')}</div>
-      </div>
+      ` : ''}
 
       <div class="p-4 space-y-3">
         ${(campaign.emails || []).map(email => `
@@ -1113,7 +1123,7 @@ function renderEmailList(bySignal) {
         `).join('')}
       </div>
     </div>
-  `).join('');
+  `;
 }
 
 // =========================================================================
@@ -1129,8 +1139,8 @@ function copyEmail(btn) {
 }
 
 function copyAllEmails(btn, key) {
-  const campaign = (state.emails?.campaigns || []).find(c =>
-    (c.signalId + '_' + (c.contact?.email || c.contact?.firstName)) === key
+  const campaign = (state.emails?.campaigns || []).find((c, idx) =>
+    String(c.signalId || idx) === String(key)
   );
   if (!campaign) return;
   const text = (campaign.emails || []).map(e =>
@@ -1147,14 +1157,18 @@ function exportAllEmails() {
   const campaigns = state.emails?.campaigns || [];
   if (!campaigns.length) { alert('No emails to export.'); return; }
 
+  // One row per contact × touch — ready for mail-merge
   const rows = [['Signal', 'Company', 'First Name', 'Last Name', 'Title', 'Email', 'Touch', 'Subject', 'Body', 'Tactic']];
   campaigns.forEach(c => {
+    const contacts = c.contacts?.length ? c.contacts : [{ firstName: '', lastName: '', title: '', email: '' }];
     (c.emails || []).forEach(e => {
-      rows.push([
-        c.signalTitle, c.company,
-        c.contact?.firstName, c.contact?.lastName, c.contact?.title, c.contact?.email || '',
-        e.touchNumber, e.subject, e.body.replace(/\n/g, ' '), e.tactic || ''
-      ]);
+      contacts.forEach(contact => {
+        rows.push([
+          c.signalTitle, c.company,
+          contact.firstName, contact.lastName, contact.title, contact.email || '',
+          e.touchNumber, e.subject, e.body.replace(/\n/g, ' '), e.tactic || '',
+        ]);
+      });
     });
   });
 

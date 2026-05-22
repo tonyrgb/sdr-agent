@@ -531,66 +531,141 @@ async def run_emails_stage(
             for sig in topic.get("signals", [])[:5]:
                 signal_map[str(sig.get("id", ""))] = sig
 
-    # Build campaign inputs from approved contacts (if provided) or full contacts result
+    # Build one campaign input per signal, grouping all contacts under it.
+    # Contacts use {{first_name}} / {{title}} tokens for personalization at send time.
     campaign_inputs = []
     if approved_contacts:
+        # approved_contacts is a flat list of {signalId, signalTitle, company, contact}.
+        # Fold entries with the same signalId into one input.
+        sig_order: list[str] = []
+        sig_meta: dict[str, dict] = {}
+        sig_contacts: dict[str, list] = {}
         for entry in approved_contacts:
-            sig_id  = str(entry.get("signalId", ""))
+            sig_id = str(entry.get("signalId", ""))
             sig_ctx = signal_map.get(sig_id, {})
-            contact = entry.get("contact", {})
-            campaign_inputs.append({
-                "signalId":      sig_id,
-                "signalTitle":   entry.get("signalTitle", ""),
-                "company":       entry.get("company", ""),
-                "signalSummary": sig_ctx.get("summary", ""),
-                "outreachHook":  sig_ctx.get("outreachHook", ""),
-                "intentScore":   sig_ctx.get("intentScore", ""),
-                "contact": {
-                    "firstName": contact.get("firstName", ""),
-                    "lastName":  contact.get("lastName", ""),
-                    "title":     contact.get("title", ""),
-                    "email":     contact.get("email", ""),
-                },
-            })
-    else:
-        for sig_entry in contacts.get("signals", []):
-            sig_id    = str(sig_entry.get("signalId", ""))
-            sig_ctx   = signal_map.get(sig_id, {})
-            for contact in sig_entry.get("contacts", [])[:5]:
-                campaign_inputs.append({
+            if sig_id not in sig_meta:
+                sig_order.append(sig_id)
+                sig_meta[sig_id] = {
                     "signalId":      sig_id,
-                    "signalTitle":   sig_entry.get("signalTitle", ""),
-                    "company":       sig_entry.get("company", ""),
+                    "signalTitle":   entry.get("signalTitle", ""),
+                    "company":       entry.get("company", ""),
                     "signalSummary": sig_ctx.get("summary", ""),
                     "outreachHook":  sig_ctx.get("outreachHook", ""),
                     "intentScore":   sig_ctx.get("intentScore", ""),
-                    "contact": {
-                        "firstName": contact.get("firstName", ""),
-                        "lastName":  contact.get("lastName", ""),
-                        "title":     contact.get("title", ""),
-                        "email":     contact.get("email", ""),
-                    },
-                })
+                }
+                sig_contacts[sig_id] = []
+            contact = entry.get("contact", {})
+            sig_contacts[sig_id].append({
+                "firstName": contact.get("firstName", ""),
+                "lastName":  contact.get("lastName", ""),
+                "title":     contact.get("title", ""),
+                "email":     contact.get("email", ""),
+            })
+        for sig_id in sig_order:
+            campaign_inputs.append({**sig_meta[sig_id], "contacts": sig_contacts[sig_id]})
+    else:
+        for sig_entry in contacts.get("signals", []):
+            sig_id  = str(sig_entry.get("signalId", ""))
+            sig_ctx = signal_map.get(sig_id, {})
+            campaign_inputs.append({
+                "signalId":      sig_id,
+                "signalTitle":   sig_entry.get("signalTitle", ""),
+                "company":       sig_entry.get("company", ""),
+                "signalSummary": sig_ctx.get("summary", ""),
+                "outreachHook":  sig_ctx.get("outreachHook", ""),
+                "intentScore":   sig_ctx.get("intentScore", ""),
+                "contacts": [
+                    {
+                        "firstName": c.get("firstName", ""),
+                        "lastName":  c.get("lastName", ""),
+                        "title":     c.get("title", ""),
+                        "email":     c.get("email", ""),
+                    }
+                    for c in sig_entry.get("contacts", [])[:5]
+                ],
+            })
 
     if not campaign_inputs:
         result = {"campaigns": [], "error": "No contacts to generate emails for"}
         pipeline_state["emails"] = result
         return result
 
-    user_message = (
-        "Generate a 3-touch email sequence for each of these signal + contact pairs. "
-        "Use the signal context and outreach hook to personalize each email.\n\n"
-        "Campaign inputs:\n" + json.dumps(campaign_inputs, indent=2)
-    )
+    campaigns: list[dict] = []
+    skipped: list[dict] = []
+    total = len(campaign_inputs)
 
-    raw = await run_agent(
-        system_prompt=EMAIL_COPYWRITE_SKILL,
-        user_message=user_message,
-        tools=[],   # No external tools needed — pure Claude generation
-        sse_queue=sse_queue,
-    )
+    for idx, entry in enumerate(campaign_inputs):
+        signal_label = f"{entry.get('signalTitle', entry.get('signalId', '?'))} / {entry.get('company', '')}"
 
-    result = await _parse_with_retry(raw, EMAIL_COPYWRITE_SKILL, "emails", sse_queue)
+        if sse_queue:
+            await sse_queue.put({
+                "type": "tool_call",
+                "tool": "generate_email",
+                "params": {"signal": signal_label, "contacts": len(entry.get("contacts", [])), "progress": f"{idx + 1}/{total}"},
+            })
+
+        user_message = (
+            "Generate a 3-touch email campaign for this signal. "
+            "The copy must be anchored to the signal trigger. "
+            "Use {{first_name}} and {{title}} as personalization tokens in the body wherever you would address the recipient — "
+            "do NOT write separate copy per contact.\n\n"
+            "Campaign input:\n" + json.dumps(entry, indent=2)
+        )
+
+        try:
+            raw = await run_agent(
+                system_prompt=EMAIL_COPYWRITE_SKILL,
+                user_message=user_message,
+                tools=[],
+                sse_queue=sse_queue,
+            )
+            parsed = await _parse_with_retry(raw, EMAIL_COPYWRITE_SKILL, f"emails/{signal_label}", sse_queue)
+        except Exception as exc:
+            reason = str(exc)
+            log.warning("Emails stage: skipping signal '%s' — agent error: %s", signal_label, reason)
+            skipped.append({"signal": signal_label, "reason": f"Agent error: {reason}"})
+            if sse_queue:
+                await sse_queue.put({
+                    "type": "tool_result",
+                    "tool": "generate_email",
+                    "preview": f"Skipped '{signal_label}': agent error — {reason}",
+                })
+            continue
+
+        if "error" in parsed:
+            reason = parsed["error"]
+            log.warning("Emails stage: skipping signal '%s' — %s", signal_label, reason)
+            skipped.append({"signal": signal_label, "reason": reason})
+            if sse_queue:
+                await sse_queue.put({
+                    "type": "tool_result",
+                    "tool": "generate_email",
+                    "preview": f"Skipped '{signal_label}': {reason}",
+                })
+            continue
+
+        new_campaigns = parsed.get("campaigns", [])
+        if not new_campaigns and "signalId" in parsed:
+            # Claude returned a bare campaign object instead of {"campaigns": [...]}
+            new_campaigns = [parsed]
+        campaigns.extend(new_campaigns)
+
+        if sse_queue:
+            await sse_queue.put({
+                "type": "tool_result",
+                "tool": "generate_email",
+                "preview": f"Campaign ready for '{signal_label}' — {len(entry.get('contacts', []))} contact(s)",
+            })
+
+    result: dict = {"campaigns": campaigns}
+    if skipped:
+        result["skipped"] = skipped
+        log.info(
+            "Emails stage complete: %d campaigns generated, %d skipped — %s",
+            len(campaigns),
+            len(skipped),
+            [(s["signal"], s["reason"]) for s in skipped],
+        )
 
     pipeline_state["emails"] = result
     if sse_queue:

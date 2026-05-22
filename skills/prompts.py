@@ -164,7 +164,7 @@ CRITICAL: Your ENTIRE response must be a single valid JSON object. Output NO tex
 
 You are executing the email-copywrite skill for Prius Intelli — an aerial intelligence company serving Oil & Gas pipeline operators.
 
-Generate a 3-touch personalized email sequence for each signal + contact pair provided.
+Generate ONE 3-touch email campaign per signal. The campaign copy is anchored to the signal's specific trigger and applies to all contacts listed under that signal. Individual recipient details are handled with personalization tokens — do NOT write separate copy per contact.
 
 ## About Prius Intelli
 Prius Intelli provides aerial imagery, LiDAR, and geospatial analytics to pipeline operators and energy companies. Services include:
@@ -174,74 +174,82 @@ Prius Intelli provides aerial imagery, LiDAR, and geospatial analytics to pipeli
 - Permitting and survey support using aerial data
 - Geohazard identification and monitoring
 
+## Personalization Tokens
+Use these tokens anywhere you would address the recipient by name or role. They are replaced at send time:
+- {{first_name}} — recipient's first name (use in greeting and once mid-email)
+- {{title}} — recipient's job title (use when bridging to their specific role)
+
+Do NOT use the actual first names or titles from the contacts list in the email body. Use tokens only.
+
 ## Email Sequence Structure
 
-**Email 1: High-Detail Signal-Anchored Outreach**
-- Opening hook: Reference the specific signal (project announcement, FID, expansion, incident) directly
-- Value bridge: Connect aerial intelligence services to their specific situation
+**Email 1: Signal-Anchored Outreach**
+- Opening hook: Reference the specific signal (project announcement, FID, expansion, open season) directly and concretely
+- Value bridge: Connect Prius Intelli's aerial intelligence to their specific situation given {{title}}
 - CTA: Ask to be pointed to the right person, or suggest a specific low-commitment next step
 - Length: 100-150 words, 3 short paragraphs
 - Tone: Conversational, knowledgeable, not salesy
 
-**Email 2: Use Case / Industry Credibility Follow-Up**
+**Email 2: Use Case / Industry Credibility**
 - Opening: Brief callback to prior email without repeating it
 - Body: Share a relevant use case, industry observation, or comparable project that builds credibility
-- Tie it to the signal's context or industry trend
+- Tie it to the signal's context or a trend relevant to their pipeline segment
 - CTA: "Would love to share a few project examples if relevant" or similar
 - Length: 80-120 words
 - Tone: Peer-to-peer, value-building
 
-**Email 3: Break-Up Email with Psychological Tactics**
-Apply ONE of these tactics (choose based on the signal context):
+**Email 3: Break-Up Email**
+Apply ONE tactic (choose based on the signal context):
 - Loss aversion: "We're wrapping up similar work in your region — may not have capacity if timing shifts"
 - Curiosity gap: "The pattern we keep seeing with [signal type] projects is worth a quick conversation"
 - Social proof: "We've been working with [comparable operator type] on exactly this — happy to share what we found"
 - Scarcity: "We're intentionally keeping this to a limited set of operators in the early stages"
-CTA: Ask for either confirmed interest OR a referral to the right decision-maker
+CTA: Ask for confirmed interest OR a referral to the right decision-maker
 Length: 60-90 words
 Tone: Direct, no pressure, leaves door open
 
 ## Style Rules
-- Use prospect's first name in greeting
-- Reference company name at least once per email
+- Greet with {{first_name}} — never a real name
+- Reference the company name at least once per email
 - Mirror Oil & Gas terminology naturally
 - No em-dashes — use commas or rephrase
 - No corporate buzzwords or generic flattery
 - No "Hope this finds you well" or similar filler
-- No subject lines unless specifically requested
 
 ## Output Format
 
-Return a valid JSON object:
+Return a valid JSON object with one campaign per signal:
 {
   "campaigns": [
     {
       "signalId": "string",
       "signalTitle": "string",
       "company": "string",
-      "contact": {
-        "firstName": "string",
-        "lastName": "string",
-        "title": "string",
-        "email": "string or null"
-      },
+      "contacts": [
+        {
+          "firstName": "string",
+          "lastName": "string",
+          "title": "string",
+          "email": "string or null"
+        }
+      ],
       "emails": [
         {
           "touchNumber": 1,
           "subject": "string (6-10 words, curiosity-driven)",
-          "body": "plain text email body",
-          "personalizationNote": "one line: what hook was used and why"
+          "body": "plain text email body using {{first_name}} and {{title}} tokens",
+          "personalizationNote": "one line: what signal hook was used and why"
         },
         {
           "touchNumber": 2,
           "subject": "string",
-          "body": "plain text email body",
+          "body": "plain text email body using {{first_name}} and {{title}} tokens",
           "personalizationNote": "one line"
         },
         {
           "touchNumber": 3,
           "subject": "string",
-          "body": "plain text email body",
+          "body": "plain text email body using {{first_name}} and {{title}} tokens",
           "tactic": "loss_aversion|curiosity_gap|social_proof|scarcity",
           "personalizationNote": "one line"
         }

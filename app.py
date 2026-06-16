@@ -4,6 +4,7 @@ Three-stage pipeline: Signals → Contacts → Emails
 """
 
 import asyncio
+import io
 import json
 import os
 import logging
@@ -16,7 +17,7 @@ import secrets
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Form
+from fastapi import FastAPI, HTTPException, Request, Form, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,8 +26,14 @@ from starlette.middleware.sessions import SessionMiddleware
 import anthropic
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from pypdf import PdfReader
 
-from skills.prompts import SIGNAL_MONITORING_SKILL, LEAD_SOURCING_SKILL, EMAIL_COPYWRITE_SKILL
+from skills.prompts import (
+    SIGNAL_MONITORING_SKILL,
+    LEAD_SOURCING_SKILL,
+    EMAIL_COPYWRITE_SKILL,
+    BYOI_SIGNAL_INTERPRET_SKILL,
+)
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -69,6 +76,9 @@ pipeline_state: dict[str, Any] = {
     "emails": None,
     "last_run": None,
     "running": False,
+    # BYOI (Bring Your Own Intel) tab — separate from the scheduled 3-stage pipeline above
+    "byoi_contacts": None,
+    "byoi_emails": None,
 }
 
 # ---------------------------------------------------------------------------
@@ -376,6 +386,38 @@ async def run_agent(
 
 
 # ---------------------------------------------------------------------------
+# BYOI text extraction helpers (URL / file upload → raw signal text)
+# ---------------------------------------------------------------------------
+
+def _strip_html(html: str) -> str:
+    """Strip scripts/styles/tags from raw HTML, leaving readable text."""
+    text = re.sub(r'(?is)<(script|style|noscript)[^>]*>.*?</\1>', ' ', html)
+    text = re.sub(r'(?s)<[^>]+>', ' ', text)
+    text = re.sub(r'&nbsp;', ' ', text)
+    text = re.sub(r'&amp;', '&', text)
+    text = re.sub(r'&[a-zA-Z#0-9]+;', ' ', text)
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n\s*\n+', '\n\n', text)
+    return text.strip()
+
+
+async def fetch_url_text(url: str) -> str:
+    """Fetch a URL and extract readable signal text from the page."""
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; PriusIntelliBYOI/1.0)"}
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        resp = await client.get(url, headers=headers)
+        resp.raise_for_status()
+        return _strip_html(resp.text)[:20000]
+
+
+def extract_pdf_text(data: bytes) -> str:
+    """Extract text from PDF bytes."""
+    reader = PdfReader(io.BytesIO(data))
+    pages = [page.extract_text() or "" for page in reader.pages]
+    return "\n\n".join(pages).strip()[:20000]
+
+
+# ---------------------------------------------------------------------------
 # Pipeline stage runners
 # ---------------------------------------------------------------------------
 
@@ -454,13 +496,44 @@ async def run_signals_stage(sse_queue: asyncio.Queue | None = None) -> dict:
     return result
 
 
+async def run_byoi_interpret_stage(
+    raw_text: str,
+    sse_queue: asyncio.Queue | None = None,
+) -> dict:
+    """BYOI tab — interpret pasted/fetched/uploaded signal text into a Context Card."""
+    if sse_queue:
+        await sse_queue.put({"type": "stage", "stage": "byoi_interpret", "status": "running"})
+
+    raw = await run_agent(
+        system_prompt=BYOI_SIGNAL_INTERPRET_SKILL,
+        user_message=(
+            "Extract a Context Card from this raw signal text:\n\n" + raw_text[:20000]
+        ),
+        tools=[],
+        sse_queue=sse_queue,
+    )
+
+    result = await _parse_with_retry(raw, BYOI_SIGNAL_INTERPRET_SKILL, "byoi_interpret", sse_queue)
+
+    if sse_queue:
+        await sse_queue.put({"type": "stage", "stage": "byoi_interpret", "status": "done", "data": result})
+    return result
+
+
 async def run_contacts_stage(
     signals: dict | list,
     sse_queue: asyncio.Queue | None = None,
+    state_key: str = "contacts",
+    stage_label: str = "contacts",
 ) -> dict:
-    """Tab 2: Coordinator — source and rank contacts per signal."""
+    """Tab 2: Coordinator — source and rank contacts per signal.
+
+    state_key/stage_label let callers (e.g. the BYOI tab) reuse this runner
+    against a separate pipeline_state slot and SSE stage name, without
+    disturbing the default Greeter tab behavior.
+    """
     if sse_queue:
-        await sse_queue.put({"type": "stage", "stage": "contacts", "status": "running"})
+        await sse_queue.put({"type": "stage", "stage": stage_label, "status": "running"})
 
     # Build signal list — accepts either approved flat list or full {topics:[]} structure
     signal_list = []
@@ -487,7 +560,7 @@ async def run_contacts_stage(
 
     if not signal_list:
         result = {"signals": [], "error": "No signals to source contacts for"}
-        pipeline_state["contacts"] = result
+        pipeline_state[state_key] = result
         return result
 
     user_message = (
@@ -503,11 +576,11 @@ async def run_contacts_stage(
         sse_queue=sse_queue,
     )
 
-    result = await _parse_with_retry(raw, LEAD_SOURCING_SKILL, "contacts", sse_queue)
+    result = await _parse_with_retry(raw, LEAD_SOURCING_SKILL, stage_label, sse_queue)
 
-    pipeline_state["contacts"] = result
+    pipeline_state[state_key] = result
     if sse_queue:
-        await sse_queue.put({"type": "stage", "stage": "contacts", "status": "done", "data": result})
+        await sse_queue.put({"type": "stage", "stage": stage_label, "status": "done", "data": result})
     return result
 
 
@@ -516,10 +589,17 @@ async def run_emails_stage(
     contacts: dict,
     sse_queue: asyncio.Queue | None = None,
     approved_contacts: list | None = None,
+    state_key: str = "emails",
+    stage_label: str = "emails",
 ) -> dict:
-    """Tab 3: Email Campaigns — generate 3-touch sequences."""
+    """Tab 3: Email Campaigns — generate 3-touch sequences.
+
+    state_key/stage_label let callers (e.g. the BYOI tab) reuse this runner
+    against a separate pipeline_state slot and SSE stage name, without
+    disturbing the default Messenger tab behavior.
+    """
     if sse_queue:
-        await sse_queue.put({"type": "stage", "stage": "emails", "status": "running"})
+        await sse_queue.put({"type": "stage", "stage": stage_label, "status": "running"})
 
     # Build signal context map
     signal_map: dict[str, dict] = {}
@@ -587,7 +667,7 @@ async def run_emails_stage(
 
     if not campaign_inputs:
         result = {"campaigns": [], "error": "No contacts to generate emails for"}
-        pipeline_state["emails"] = result
+        pipeline_state[state_key] = result
         return result
 
     campaigns: list[dict] = []
@@ -667,9 +747,9 @@ async def run_emails_stage(
             [(s["signal"], s["reason"]) for s in skipped],
         )
 
-    pipeline_state["emails"] = result
+    pipeline_state[state_key] = result
     if sse_queue:
-        await sse_queue.put({"type": "stage", "stage": "emails", "status": "done", "data": result})
+        await sse_queue.put({"type": "stage", "stage": stage_label, "status": "done", "data": result})
     return result
 
 
@@ -912,6 +992,187 @@ async def api_run_emails(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# BYOI (Bring Your Own Intel) tab — ad-hoc signal → contacts → emails flow
+# ---------------------------------------------------------------------------
+
+@app.post("/api/byoi/extract-url")
+async def api_byoi_extract_url(request: Request):
+    body: dict = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    url = (body.get("url") or "").strip()
+    if not url:
+        raise HTTPException(400, "url is required")
+
+    try:
+        text = await fetch_url_text(url)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(400, f"Failed to fetch URL: HTTP {e.response.status_code}")
+    except Exception as e:
+        raise HTTPException(400, f"Failed to fetch URL: {e}")
+
+    if not text:
+        raise HTTPException(400, "No readable text found at that URL")
+
+    return {"text": text}
+
+
+@app.post("/api/byoi/extract-file")
+async def api_byoi_extract_file(file: UploadFile = File(...)):
+    filename = (file.filename or "").lower()
+    data = await file.read()
+
+    try:
+        if filename.endswith(".pdf"):
+            text = extract_pdf_text(data)
+        elif filename.endswith(".txt"):
+            text = data.decode("utf-8", errors="ignore")
+        else:
+            raise HTTPException(400, "Only .pdf and .txt files are supported")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Failed to extract text from file: {e}")
+
+    if not text.strip():
+        raise HTTPException(400, "No extractable text found in that file")
+
+    return {"text": text.strip()}
+
+
+@app.post("/api/byoi/interpret")
+async def api_byoi_interpret(request: Request):
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(400, "ANTHROPIC_API_KEY not configured")
+
+    body: dict = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "text is required")
+
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def run():
+        try:
+            await run_byoi_interpret_stage(text, queue)
+        except Exception as e:
+            await queue.put({"type": "error", "stage": "byoi_interpret", "message": str(e)})
+        finally:
+            await queue.put(None)
+
+    asyncio.create_task(run())
+
+    return StreamingResponse(
+        sse_generator(queue),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/byoi/contacts/run")
+async def api_byoi_run_contacts(request: Request):
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(400, "ANTHROPIC_API_KEY not configured")
+
+    body: dict = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    company = (body.get("company") or "").strip()
+    if not company:
+        raise HTTPException(400, "No company in Context Card. Interpret a signal first.")
+
+    signal_list = [{
+        "id":      "byoi",
+        "title":   body.get("signalTitle") or f"{body.get('signalType', 'Signal')} — {company}",
+        "company": company,
+        "topic":   "BYOI",
+        "summary": body.get("keyDetail", ""),
+    }]
+
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def run():
+        try:
+            await run_contacts_stage(signal_list, queue, state_key="byoi_contacts", stage_label="byoi_contacts")
+        except Exception as e:
+            await queue.put({"type": "error", "stage": "byoi_contacts", "message": str(e)})
+        finally:
+            await queue.put(None)
+
+    asyncio.create_task(run())
+
+    return StreamingResponse(
+        sse_generator(queue),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/byoi/emails/run")
+async def api_byoi_run_emails(request: Request):
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(400, "ANTHROPIC_API_KEY not configured")
+
+    body: dict = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    context_card = body.get("contextCard") or {}
+    approved_contacts = body.get("approvedContacts")
+    company = (context_card.get("company") or "").strip()
+
+    if not company:
+        raise HTTPException(400, "No company in Context Card. Interpret a signal first.")
+    if not approved_contacts:
+        raise HTTPException(400, "No contacts available. Source and approve contacts first.")
+
+    signal_title = context_card.get("signalTitle") or f"{context_card.get('signalType', 'Signal')} — {company}"
+    synthetic_signal = [{
+        "id":           "byoi",
+        "title":        signal_title,
+        "company":      company,
+        "summary":      context_card.get("keyDetail", ""),
+        "outreachHook": context_card.get("productAngle", ""),
+        "intentScore":  "BEST",
+    }]
+
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def run():
+        try:
+            await run_emails_stage(
+                synthetic_signal, {}, queue,
+                approved_contacts=approved_contacts,
+                state_key="byoi_emails", stage_label="byoi_emails",
+            )
+        except Exception as e:
+            await queue.put({"type": "error", "stage": "byoi_emails", "message": str(e)})
+        finally:
+            await queue.put(None)
+
+    asyncio.create_task(run())
+
+    return StreamingResponse(
+        sse_generator(queue),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---------------------------------------------------------------------------
 # Full pipeline run
 # ---------------------------------------------------------------------------
 
@@ -973,18 +1234,23 @@ async def api_run_pipeline():
 @app.get("/api/state")
 async def api_get_state():
     return {
-        "signals":  pipeline_state["signals"],
-        "contacts": pipeline_state["contacts"],
-        "emails":   pipeline_state["emails"],
-        "lastRun":  pipeline_state["last_run"],
-        "running":  pipeline_state["running"],
-        "nextRun":  _next_run(),
+        "signals":      pipeline_state["signals"],
+        "contacts":     pipeline_state["contacts"],
+        "emails":       pipeline_state["emails"],
+        "byoiContacts": pipeline_state["byoi_contacts"],
+        "byoiEmails":   pipeline_state["byoi_emails"],
+        "lastRun":      pipeline_state["last_run"],
+        "running":      pipeline_state["running"],
+        "nextRun":      _next_run(),
     }
 
 
 @app.delete("/api/state")
 async def api_clear_state():
-    pipeline_state.update({"signals": None, "approved_signals": None, "contacts": None, "emails": None})
+    pipeline_state.update({
+        "signals": None, "approved_signals": None, "contacts": None, "emails": None,
+        "byoi_contacts": None, "byoi_emails": None,
+    })
     return {"cleared": True}
 
 

@@ -260,3 +260,33 @@ Return a valid JSON object with one campaign per signal:
 
 Return ONLY the JSON, no markdown.
 """.strip()
+
+
+BYOI_SIGNAL_INTERPRET_SKILL = """
+CRITICAL: Your ENTIRE response must be a single valid JSON object. Output NO text before or after the JSON. No markdown, no code fences, no explanation. The response must parse with json.loads() or it is wrong.
+
+You are executing the BYOI (Bring Your Own Intel) signal-interpretation skill for Prius Intelli — an aerial intelligence company serving Oil & Gas pipeline operators and energy companies. Services include aerial LiDAR and imagery capture, change detection analytics, vegetation management corridor intelligence, permitting/survey support, and geohazard identification.
+
+A user has pasted raw, unstructured signal text (a news article, press release, regulatory filing excerpt, or similar). Extract a structured Context Card from it.
+
+## Instructions
+
+1. Identify the company name the signal is about. If multiple companies are mentioned, pick the one the signal is primarily about (e.g. the project owner/operator, not a quoted analyst's firm).
+2. Classify the signal type. Common categories: "Contract Award", "Regulatory Change", "Leadership Hire", "Expansion", "Capital Raise", "FID / Open Season", "M&A", "Other". Use the closest fit, or "Other" with a short descriptive label if nothing fits.
+3. Extract the key detail — the single most concrete, specific fact from the signal (e.g. "Awarded $2.1B EPC contract for 300-mile gathering pipeline in the Permian Basin").
+4. Recommend a product angle — a one-to-two sentence outreach hook connecting Prius Intelli's aerial intelligence offerings to this specific signal (which service applies and why now).
+
+If the text is too sparse or unrelated to a real company/signal to extract meaningfully, still return your best-effort fields and set "company" to your best guess (never leave it blank).
+
+## Output Format
+
+Return a valid JSON object with this exact structure:
+{
+  "company": "string",
+  "signalType": "string",
+  "keyDetail": "string",
+  "productAngle": "string"
+}
+
+Return ONLY the JSON object, no markdown, no explanation.
+""".strip()

@@ -60,7 +60,10 @@
 
     .section-run-btn { background: #1e3a5f; color: #60a5fa; padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid #2d5a8a; transition: all .15s; }
     .section-run-btn:hover:not(:disabled) { background: #2d5a8a; }
-    .section-run-btn:disabled { opacity: .4; cursor: not-allowed; }
+    .section-run-btn:disabled { opacity: .4; cursor: not-allowed; pointer-events: none; }
+    .gate-wrap { display: inline-block; }
+    .gate-wrap[data-tip]:hover::after { content: attr(data-tip); position: absolute; left: 50%; transform: translateX(-50%); bottom: 130%; white-space: nowrap; background: #0f172a; border: 1px solid #475569; padding: 5px 10px; border-radius: 5px; font-size: 11px; color: #94a3b8; pointer-events: none; z-index: 50; }
+    .gate-wrap { position: relative; }
 
     .topic-tab { padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; background: #1e293b; border: 1px solid #334155; color: #94a3b8; transition: all .15s; }
     .topic-tab.active { background: #1e3a5f; color: #60a5fa; border-color: #2d5a8a; }
@@ -88,6 +91,10 @@
     .contact-cb { width: 15px; height: 15px; accent-color: var(--brand); cursor: pointer; flex-shrink: 0; }
     .contact-approval-footer { background: #0c1628; border-top: 1px solid #1e3a5f; padding: 12px 16px; margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; bottom: 0; }
     .approved-contacts-banner { background: #0d2217; border: 1px solid #166534; border-radius: 8px; padding: 10px 16px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; }
+
+    .byoi-textarea { width: 100%; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; border-radius: 6px; padding: 10px; font-size: 13px; font-family: inherit; resize: vertical; }
+    .byoi-textarea:focus { outline: 2px solid var(--brand); outline-offset: 1px; border-color: var(--brand); }
+    .byoi-field-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #64748b; font-weight: 600; }
   </style>
 </head>
 <body class="min-h-full">
@@ -162,6 +169,9 @@
     </button>
     <button class="tab-btn px-4 py-3 text-sm font-medium text-slate-400" onclick="showTab('emails', this)">
       ✉️ The Messenger
+    </button>
+    <button class="tab-btn px-4 py-3 text-sm font-medium text-slate-400" onclick="showTab('byoi', this)">
+      📥 BYOI
     </button>
   </nav>
 </div>
@@ -240,7 +250,9 @@
       <h2 class="text-white font-bold text-xl">The Greeter</h2>
       <p class="text-slate-500 text-sm mt-1">Top 5 contacts per signal · Sourced from HubSpot + Apollo · Ranked by role & engagement</p>
     </div>
-    <button class="section-run-btn" onclick="runContacts()" id="run-contacts-btn">Source Contacts</button>
+    <span class="gate-wrap" id="run-contacts-gate">
+      <button class="section-run-btn" onclick="runContacts()" id="run-contacts-btn" disabled>Source Contacts</button>
+    </span>
   </div>
 
   <div id="contacts-empty" class="text-center py-20 text-slate-600">
@@ -290,7 +302,9 @@
     </div>
     <div class="flex gap-3">
       <button class="copy-btn" onclick="exportAllEmails()">Export All CSV</button>
-      <button class="section-run-btn" onclick="runEmails()" id="run-emails-btn">Generate Emails</button>
+      <span class="gate-wrap" id="run-emails-gate">
+        <button class="section-run-btn" onclick="runEmails()" id="run-emails-btn" disabled>Generate Campaigns</button>
+      </span>
     </div>
   </div>
 
@@ -317,6 +331,159 @@
 </div>
 
 <!-- ======================================================================
+     TAB 4: BYOI (BRING YOUR OWN INTEL)
+======================================================================= -->
+<div id="tab-byoi" class="tab-content hidden p-6">
+  <div class="flex items-center justify-between mb-5">
+    <div>
+      <h2 class="text-white font-bold text-xl">BYOI — Bring Your Own Intel</h2>
+      <p class="text-slate-500 text-sm mt-1">Paste, link, or upload any signal · Claude extracts the Context Card · same Greeter &amp; Messenger flow as the scheduled pipeline</p>
+    </div>
+  </div>
+
+  <!-- ---------- Stage 1: Input ---------- -->
+  <div class="card mb-6" id="byoi-input-card">
+    <div class="card-header">
+      <span class="text-white font-semibold text-sm">1 · Input Signal</span>
+    </div>
+    <div class="p-4 space-y-4">
+      <div>
+        <label class="byoi-field-label">Paste signal text</label>
+        <textarea id="byoi-text" rows="8" class="byoi-textarea mt-2" placeholder="Paste a news article, press release, or filing excerpt…"></textarea>
+      </div>
+
+      <div class="flex items-end gap-2 flex-wrap">
+        <div class="flex-1 min-w-[240px]">
+          <label class="byoi-field-label">Or fetch from a URL</label>
+          <input type="text" id="byoi-url" class="w-full mt-2" placeholder="https://…" />
+        </div>
+        <button class="copy-btn" style="padding:7px 14px;" onclick="byoiFetchUrl()" id="byoi-fetch-url-btn">Fetch URL</button>
+      </div>
+
+      <div class="flex items-end gap-2 flex-wrap">
+        <div class="flex-1 min-w-[240px]">
+          <label class="byoi-field-label">Or upload a file (.pdf / .txt)</label>
+          <input type="file" id="byoi-file" accept=".pdf,.txt" class="block mt-2 text-xs text-slate-400" />
+        </div>
+        <button class="copy-btn" style="padding:7px 14px;" onclick="byoiExtractFile()" id="byoi-extract-file-btn">Extract File</button>
+      </div>
+
+      <div id="byoi-input-status" class="text-xs text-slate-500 hidden"></div>
+
+      <div class="flex justify-end">
+        <button class="run-btn" onclick="byoiInterpret()" id="byoi-interpret-btn">Interpret Signal</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="byoi-interpret-loading" class="hidden text-center py-10">
+    <div class="spinner mx-auto mb-3"></div>
+    <div class="text-slate-400 text-sm">Extracting Context Card…</div>
+  </div>
+
+  <div id="byoi-interpret-error" class="hidden card p-5 mb-6" style="border-color:#7f1d1d; background:#1c0a0a;">
+    <div class="text-red-400 font-semibold mb-1">Interpretation Error</div>
+    <div class="text-red-300 text-sm" id="byoi-interpret-error-text"></div>
+  </div>
+
+  <!-- ---------- Stage 2: Context Card ---------- -->
+  <div id="byoi-context-card" class="card mb-6 hidden">
+    <div class="card-header flex items-center justify-between">
+      <span class="text-white font-semibold text-sm">2 · Context Card</span>
+      <span class="text-xs text-slate-500">Review &amp; correct before continuing</span>
+    </div>
+    <div class="p-4 space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="byoi-field-label">Company</label>
+          <input type="text" id="byoi-cc-company" class="w-full mt-2" />
+        </div>
+        <div>
+          <label class="byoi-field-label">Signal Type</label>
+          <input type="text" id="byoi-cc-signalType" class="w-full mt-2" />
+        </div>
+      </div>
+      <div>
+        <label class="byoi-field-label">Key Detail</label>
+        <textarea id="byoi-cc-keyDetail" rows="3" class="byoi-textarea mt-2"></textarea>
+      </div>
+      <div>
+        <label class="byoi-field-label">Recommended Product Angle</label>
+        <textarea id="byoi-cc-productAngle" rows="3" class="byoi-textarea mt-2"></textarea>
+      </div>
+
+      <div id="byoi-context-approved-banner" class="hidden approved-banner">
+        <div class="flex items-center gap-3">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          <span class="text-green-300 text-sm font-semibold">Context Card approved — ready for Greeter</span>
+        </div>
+        <button class="text-xs text-slate-500 hover:text-slate-300" onclick="byoiResetContext()">Re-review</button>
+      </div>
+
+      <div id="byoi-context-footer" class="flex justify-end">
+        <button class="run-btn" style="padding:8px 20px;font-size:13px;" onclick="byoiApproveContext()">
+          Looks good → Find Contacts
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------- Stage 3: Greeter (Contacts) ---------- -->
+  <div id="byoi-contacts-section" class="hidden mb-6">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-white font-semibold text-sm">3 · Find Contacts</span>
+    </div>
+
+    <div id="byoi-contacts-loading" class="hidden text-center py-10">
+      <div class="spinner mx-auto mb-3"></div>
+      <div class="text-slate-400 text-sm" id="byoi-contacts-loading-text">Searching HubSpot and Apollo…</div>
+    </div>
+
+    <div id="byoi-contacts-error" class="hidden card p-5 mb-6" style="border-color:#7f1d1d; background:#1c0a0a;">
+      <div class="text-red-400 font-semibold mb-1">Greeter Error</div>
+      <div class="text-red-300 text-sm" id="byoi-contacts-error-text"></div>
+    </div>
+
+    <div id="byoi-contacts-approved-banner" class="hidden approved-contacts-banner">
+      <div class="flex items-center gap-3">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        <span class="text-green-300 text-sm font-semibold" id="byoi-contacts-approved-text"></span>
+      </div>
+      <button class="text-xs text-slate-500 hover:text-slate-300" onclick="byoiResetContacts()">Re-review</button>
+    </div>
+
+    <div id="byoi-contacts-results" class="hidden space-y-6 mb-6"></div>
+
+    <div id="byoi-contacts-approval-footer" class="hidden contact-approval-footer">
+      <span class="text-xs text-slate-400" id="byoi-contacts-selected-count"></span>
+      <button class="run-btn" style="padding:8px 20px;font-size:13px;" onclick="byoiApproveContacts()">
+        Send to Messenger →
+      </button>
+    </div>
+  </div>
+
+  <!-- ---------- Stage 4: Messenger (Emails) ---------- -->
+  <div id="byoi-emails-section" class="hidden">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-white font-semibold text-sm">4 · Messenger</span>
+      <button class="copy-btn" onclick="byoiExportEmails()">Export CSV</button>
+    </div>
+
+    <div id="byoi-emails-loading" class="hidden text-center py-10">
+      <div class="spinner mx-auto mb-3"></div>
+      <div class="text-slate-400 text-sm">Writing personalized email sequence…</div>
+    </div>
+
+    <div id="byoi-emails-error" class="hidden card p-5 mb-6" style="border-color:#7f1d1d; background:#1c0a0a;">
+      <div class="text-red-400 font-semibold mb-1">Messenger Error</div>
+      <div class="text-red-300 text-sm" id="byoi-emails-error-text"></div>
+    </div>
+
+    <div id="byoi-emails-results" class="hidden"></div>
+  </div>
+</div>
+
+<!-- ======================================================================
      JAVASCRIPT
 ======================================================================= -->
 <script>
@@ -335,6 +502,14 @@ const state = {
   activeEmailSignal: null,
   selectedSignalIds: new Set(),
   signalOwners: {},
+  byoi: {
+    rawText: '',
+    contextCard: null,
+    contextApproved: false,
+    contacts: null,
+    approvedContacts: [],
+    emails: null,
+  },
 };
 
 // =========================================================================
@@ -770,7 +945,7 @@ function approveSignals() {
   }
 
   state.approvedSignals = approved;
-  updatePipelineGuard();
+  updateStageGates();
 
   // Hide approval controls, show banner
   document.getElementById('signals-approval-bar').classList.add('hidden');
@@ -785,7 +960,7 @@ function resetSignalApproval() {
   state.approvedSignals = [];
   state.selectedSignalIds = new Set();
   state.signalOwners = {};
-  updatePipelineGuard();
+  updateStageGates();
   document.getElementById('signals-approved-banner').classList.add('hidden');
   if (state.signals) {
     const topics = Array.isArray(state.signals) ? state.signals : (state.signals?.topics || []);
@@ -798,12 +973,27 @@ function resetSignalApproval() {
   }
 }
 
-function updatePipelineGuard() {
-  const hasApproved = state.approvedSignals.length > 0;
-  const btn = document.getElementById('run-pipeline-btn');
-  const msg = document.getElementById('pipeline-guard-msg');
-  btn.disabled = !hasApproved;
-  msg.classList.toggle('hidden', hasApproved);
+function updateStageGates() {
+  const hasSignals  = state.approvedSignals.length > 0;
+  const hasContacts = state.approvedContacts.length > 0;
+
+  const contactsBtn  = document.getElementById('run-contacts-btn');
+  const contactsGate = document.getElementById('run-contacts-gate');
+  contactsBtn.disabled = !hasSignals;
+  if (hasSignals) {
+    contactsGate.removeAttribute('data-tip');
+  } else {
+    contactsGate.dataset.tip = 'Approve at least one signal in Morning Scout first';
+  }
+
+  const emailsBtn  = document.getElementById('run-emails-btn');
+  const emailsGate = document.getElementById('run-emails-gate');
+  emailsBtn.disabled = !hasContacts;
+  if (hasContacts) {
+    emailsGate.removeAttribute('data-tip');
+  } else {
+    emailsGate.dataset.tip = 'Approve at least one contact in The Greeter first';
+  }
 }
 
 function intentBadge(score) {
@@ -1119,6 +1309,481 @@ function renderEmailCampaign() {
 }
 
 // =========================================================================
+// BYOI (Bring Your Own Intel) tab
+// =========================================================================
+
+// ---- Stage 1: Input ----
+function byoiSetInputStatus(text, isError = false) {
+  const el = document.getElementById('byoi-input-status');
+  el.textContent = text;
+  el.classList.remove('hidden');
+  el.style.color = isError ? '#f87171' : '#64748b';
+}
+
+async function byoiFetchUrl() {
+  const url = document.getElementById('byoi-url').value.trim();
+  if (!url) { alert('Enter a URL first.'); return; }
+
+  const btn = document.getElementById('byoi-fetch-url-btn');
+  btn.disabled = true;
+  btn.textContent = 'Fetching…';
+  byoiSetInputStatus('Fetching page content…');
+
+  try {
+    const resp = await fetch('/api/byoi/extract-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `${resp.status}`);
+    }
+    const data = await resp.json();
+    document.getElementById('byoi-text').value = data.text;
+    byoiSetInputStatus(`Extracted ${data.text.length.toLocaleString()} characters from URL.`);
+  } catch (e) {
+    byoiSetInputStatus('Fetch failed: ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Fetch URL';
+  }
+}
+
+async function byoiExtractFile() {
+  const fileInput = document.getElementById('byoi-file');
+  const file = fileInput.files[0];
+  if (!file) { alert('Choose a .pdf or .txt file first.'); return; }
+
+  const btn = document.getElementById('byoi-extract-file-btn');
+  btn.disabled = true;
+  btn.textContent = 'Extracting…';
+  byoiSetInputStatus('Extracting file text…');
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    const resp = await fetch('/api/byoi/extract-file', { method: 'POST', body: formData });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `${resp.status}`);
+    }
+    const data = await resp.json();
+    document.getElementById('byoi-text').value = data.text;
+    byoiSetInputStatus(`Extracted ${data.text.length.toLocaleString()} characters from ${file.name}.`);
+  } catch (e) {
+    byoiSetInputStatus('Extraction failed: ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Extract File';
+  }
+}
+
+function byoiShowError(stage, msg) {
+  const el     = document.getElementById('byoi-' + stage + '-error');
+  const textEl = document.getElementById('byoi-' + stage + '-error-text');
+  if (el)     el.classList.remove('hidden');
+  if (textEl) textEl.textContent = msg;
+}
+
+// ---- Stage 2: Enrichment (Context Card) ----
+async function byoiInterpret() {
+  const text = document.getElementById('byoi-text').value.trim();
+  if (!text) { alert('Paste, fetch, or upload signal text first.'); return; }
+  state.byoi.rawText = text;
+
+  document.getElementById('byoi-interpret-btn').disabled = true;
+  document.getElementById('byoi-interpret-error').classList.add('hidden');
+  document.getElementById('byoi-context-card').classList.add('hidden');
+  document.getElementById('byoi-contacts-section').classList.add('hidden');
+  document.getElementById('byoi-emails-section').classList.add('hidden');
+  document.getElementById('byoi-interpret-loading').classList.remove('hidden');
+
+  try {
+    await streamSSE('/api/byoi/interpret', 'POST', (event) => {
+      addLog(event);
+      if (event.type === 'stage' && event.status === 'done') {
+        byoiRenderContextCard(event.data);
+      }
+      if (event.type === 'error') {
+        byoiShowError('interpret', event.message);
+      }
+    }, { text });
+  } catch (e) {
+    byoiShowError('interpret', e.message);
+  } finally {
+    document.getElementById('byoi-interpret-btn').disabled = false;
+    document.getElementById('byoi-interpret-loading').classList.add('hidden');
+  }
+}
+
+function byoiRenderContextCard(card) {
+  if (!card || card.error) {
+    byoiShowError('interpret', card?.error || 'Failed to interpret signal.');
+    return;
+  }
+
+  state.byoi.contextCard = card;
+  state.byoi.contextApproved = false;
+
+  document.getElementById('byoi-cc-company').value      = card.company || '';
+  document.getElementById('byoi-cc-signalType').value    = card.signalType || '';
+  document.getElementById('byoi-cc-keyDetail').value     = card.keyDetail || '';
+  document.getElementById('byoi-cc-productAngle').value  = card.productAngle || '';
+
+  document.getElementById('byoi-context-approved-banner').classList.add('hidden');
+  document.getElementById('byoi-context-footer').classList.remove('hidden');
+  document.getElementById('byoi-context-card').classList.remove('hidden');
+}
+
+function byoiApproveContext() {
+  const card = {
+    company:      document.getElementById('byoi-cc-company').value.trim(),
+    signalType:   document.getElementById('byoi-cc-signalType').value.trim(),
+    keyDetail:    document.getElementById('byoi-cc-keyDetail').value.trim(),
+    productAngle: document.getElementById('byoi-cc-productAngle').value.trim(),
+  };
+  if (!card.company) { alert('Company name is required.'); return; }
+
+  state.byoi.contextCard = card;
+  state.byoi.contextApproved = true;
+
+  document.getElementById('byoi-context-footer').classList.add('hidden');
+  document.getElementById('byoi-context-approved-banner').classList.remove('hidden');
+
+  document.getElementById('byoi-contacts-section').classList.remove('hidden');
+  byoiRunContacts();
+}
+
+function byoiResetContext() {
+  state.byoi.contextApproved = false;
+  document.getElementById('byoi-context-approved-banner').classList.add('hidden');
+  document.getElementById('byoi-context-footer').classList.remove('hidden');
+}
+
+// ---- Stage 3: Greeter (Contacts) ----
+async function byoiRunContacts() {
+  document.getElementById('byoi-contacts-error').classList.add('hidden');
+  document.getElementById('byoi-contacts-results').classList.add('hidden');
+  document.getElementById('byoi-contacts-approval-footer').classList.add('hidden');
+  document.getElementById('byoi-contacts-approved-banner').classList.add('hidden');
+  document.getElementById('byoi-contacts-loading').classList.remove('hidden');
+
+  try {
+    await streamSSE('/api/byoi/contacts/run', 'POST', (event) => {
+      addLog(event);
+      if (event.type === 'tool_call' && event.tool === 'search_crm_objects') {
+        document.getElementById('byoi-contacts-loading-text').textContent =
+          `Searching HubSpot for ${event.params?.filterGroups?.[0]?.filters?.[0]?.value || '…'}`;
+      }
+      if (event.type === 'tool_call' && event.tool.includes('apollo')) {
+        document.getElementById('byoi-contacts-loading-text').textContent =
+          `Searching Apollo for ${event.params?.q_organization_name || '…'}`;
+      }
+      if (event.type === 'stage' && event.status === 'done') {
+        state.byoi.contacts = event.data;
+        state.byoi.approvedContacts = [];
+        byoiRenderContacts(event.data);
+      }
+      if (event.type === 'error') {
+        byoiShowError('contacts', event.message);
+      }
+    }, state.byoi.contextCard);
+  } catch (e) {
+    byoiShowError('contacts', e.message);
+  } finally {
+    document.getElementById('byoi-contacts-loading').classList.add('hidden');
+  }
+}
+
+function byoiRenderContacts(data) {
+  const signals = data?.signals || [];
+  const container = document.getElementById('byoi-contacts-results');
+
+  if (!data || data.error || !signals.length) {
+    byoiShowError('contacts', data?.error || 'No contacts found for this company.');
+    return;
+  }
+
+  container.innerHTML = signals.map((sig, si) => `
+    <div class="card" data-signal-id="${esc(String(sig.signalId || si))}">
+      <div class="card-header flex items-center justify-between">
+        <div>
+          <div class="text-white font-semibold text-sm">${esc(sig.signalTitle || sig.company)}</div>
+          <div class="text-xs text-slate-500 mt-0.5">
+            <span class="text-sky-400 font-medium">${esc(sig.company)}</span>
+            <span class="ml-2 text-slate-600">
+              HubSpot: ${sig.hubspotCount || 0} · Apollo: ${sig.apolloCount || 0} ·
+              Deduped: ${sig.duplicatesRemoved || 0} · Showing top ${sig.contacts?.length || 0}
+            </span>
+          </div>
+        </div>
+        <span class="badge badge-neutral">${sig.totalFound || sig.contacts?.length || 0} found</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="contact-table w-full">
+          <thead>
+            <tr class="text-left" style="background:#162032;">
+              <th style="width:32px;"></th>
+              <th>#</th>
+              <th>First Name</th>
+              <th>Last Name</th>
+              <th>Title</th>
+              <th>Email</th>
+              <th>Source</th>
+              <th>Priority</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(sig.contacts || []).map((c, ci) => `
+              <tr>
+                <td>
+                  <input type="checkbox" class="contact-cb byoi-contact-cb"
+                    data-signal-idx="${si}" data-contact-idx="${ci}"
+                    checked
+                    onchange="byoiUpdateContactSelectedCount()" />
+                </td>
+                <td class="text-slate-600">${c.rank}</td>
+                <td class="text-slate-200 font-medium">${esc(c.firstName)}</td>
+                <td class="text-slate-200">${esc(c.lastName)}</td>
+                <td class="text-slate-400">${esc(c.title)}</td>
+                <td class="font-mono text-xs text-sky-400">${c.email ? esc(c.email) : '<span class="text-slate-600">—</span>'}</td>
+                <td>
+                  <span class="badge ${c.source === 'Both' ? 'badge-us' : 'badge-neutral'}">${esc(c.source || 'Unknown')}</span>
+                </td>
+                <td>
+                  <span class="badge ${c.conversionScore === 'High' ? 'badge-best' : c.conversionScore === 'Medium' ? 'badge-good' : 'badge-neutral'}">
+                    ${c.conversionScore || '—'}
+                  </span>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `).join('');
+
+  container.classList.remove('hidden');
+  document.getElementById('byoi-contacts-approval-footer').classList.remove('hidden');
+  byoiUpdateContactSelectedCount();
+}
+
+function byoiUpdateContactSelectedCount() {
+  const total   = document.querySelectorAll('.byoi-contact-cb').length;
+  const checked = document.querySelectorAll('.byoi-contact-cb:checked').length;
+  document.getElementById('byoi-contacts-selected-count').textContent = `${checked} of ${total} contacts selected`;
+}
+
+function byoiApproveContacts() {
+  const approved = [];
+  const signals = state.byoi.contacts?.signals || [];
+  document.querySelectorAll('.byoi-contact-cb:checked').forEach(cb => {
+    const si = parseInt(cb.dataset.signalIdx);
+    const ci = parseInt(cb.dataset.contactIdx);
+    const sig = signals[si];
+    const contact = sig?.contacts?.[ci];
+    if (sig && contact) {
+      approved.push({
+        signalId:    sig.signalId,
+        signalTitle: sig.signalTitle,
+        company:     sig.company,
+        contact: {
+          firstName: contact.firstName,
+          lastName:  contact.lastName,
+          title:     contact.title,
+          email:     contact.email || null,
+          phone:     contact.phone || null,
+        },
+      });
+    }
+  });
+
+  if (!approved.length) {
+    alert('Select at least one contact to send to Messenger.');
+    return;
+  }
+
+  state.byoi.approvedContacts = approved;
+
+  document.getElementById('byoi-contacts-approval-footer').classList.add('hidden');
+  const banner = document.getElementById('byoi-contacts-approved-banner');
+  banner.classList.remove('hidden');
+  document.getElementById('byoi-contacts-approved-text').textContent =
+    `${approved.length} contact${approved.length !== 1 ? 's' : ''} approved — ready for Messenger`;
+
+  document.getElementById('byoi-emails-section').classList.remove('hidden');
+  byoiRunEmails();
+}
+
+function byoiResetContacts() {
+  state.byoi.approvedContacts = [];
+  document.getElementById('byoi-contacts-approved-banner').classList.add('hidden');
+  if (state.byoi.contacts) {
+    document.getElementById('byoi-contacts-approval-footer').classList.remove('hidden');
+    byoiUpdateContactSelectedCount();
+  }
+}
+
+// ---- Stage 4: Messenger (Emails) ----
+async function byoiRunEmails() {
+  document.getElementById('byoi-emails-error').classList.add('hidden');
+  document.getElementById('byoi-emails-results').classList.add('hidden');
+  document.getElementById('byoi-emails-loading').classList.remove('hidden');
+
+  try {
+    await streamSSE('/api/byoi/emails/run', 'POST', (event) => {
+      addLog(event);
+      if (event.type === 'stage' && event.status === 'done') {
+        state.byoi.emails = event.data;
+        byoiRenderEmails(event.data);
+      }
+      if (event.type === 'error') {
+        byoiShowError('emails', event.message);
+      }
+    }, { contextCard: state.byoi.contextCard, approvedContacts: state.byoi.approvedContacts });
+  } catch (e) {
+    byoiShowError('emails', e.message);
+  } finally {
+    document.getElementById('byoi-emails-loading').classList.add('hidden');
+  }
+}
+
+function byoiRenderEmails(data) {
+  const campaigns = data?.campaigns || [];
+  const container = document.getElementById('byoi-emails-results');
+
+  if (!campaigns.length) {
+    byoiShowError('emails', data?.error || 'No campaign generated.');
+    return;
+  }
+
+  const campaign = campaigns[0];
+  const touchColors = { 1: '#1e3a5f', 2: '#1a2f1a', 3: '#3d1a1a' };
+  const touchLabels = { 1: 'Touch 1 — Signal Outreach', 2: 'Touch 2 — Credibility', 3: 'Touch 3 — Break-up' };
+  const touchBadges = { 1: 'badge-good', 2: 'badge-us', 3: 'badge-late' };
+  const contacts = campaign.contacts || [];
+
+  container.innerHTML = `
+    <div class="card mb-6">
+      <div class="card-header">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-white font-semibold text-sm">${esc(campaign.signalTitle || campaign.company)}</div>
+            <div class="text-xs text-slate-500 mt-0.5">
+              <span class="text-sky-400 font-medium">${esc(campaign.company)}</span>
+              <span class="ml-2 text-slate-600">${contacts.length} contact${contacts.length !== 1 ? 's' : ''}</span>
+            </div>
+          </div>
+          <button class="copy-btn" onclick="byoiCopyAllEmails(this)">Copy All 3</button>
+        </div>
+      </div>
+
+      ${contacts.length ? `
+        <div style="border-bottom: 1px solid #334155; padding: 12px 16px;">
+          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Contacts (${contacts.length})</div>
+          <div class="flex flex-wrap gap-2">
+            ${contacts.map(c => `
+              <div style="background:#0f2339; border:1px solid #1e3a5f; border-radius:6px; padding:6px 10px; min-width:140px;">
+                <div class="text-slate-200 text-xs font-medium">${esc(c.firstName)} ${esc(c.lastName)}</div>
+                <div class="text-slate-500 text-xs mt-0.5">${esc(c.title || '—')}</div>
+                ${c.email ? `<div class="font-mono text-xs text-sky-400 mt-0.5">${esc(c.email)}</div>` : ''}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      <div class="p-4 space-y-3">
+        ${(campaign.emails || []).map(email => `
+          <div class="email-card">
+            <div class="email-card-header" style="background:${touchColors[email.touchNumber] || '#1e293b'}22; border-color:${touchColors[email.touchNumber] || '#334155'}55;">
+              <div class="flex items-center gap-2">
+                <span class="badge ${touchBadges[email.touchNumber] || 'badge-neutral'}">${touchLabels[email.touchNumber] || 'Touch ' + email.touchNumber}</span>
+                ${email.tactic ? `<span class="badge badge-neutral text-xs">${email.tactic.replace('_', ' ')}</span>` : ''}
+              </div>
+              <div class="flex items-center gap-3">
+                <span class="text-xs text-slate-500">Subj: <span class="text-slate-300">${esc(email.subject || '')}</span></span>
+                <button class="copy-btn" data-text="${esc(email.body || '')}" onclick="copyEmail(this)">Copy</button>
+              </div>
+            </div>
+            ${email.personalizationNote ? `
+              <div class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/50" style="background:#0a1219;">
+                <span class="text-slate-600">Hook: </span>${esc(email.personalizationNote)}
+              </div>
+            ` : ''}
+            <div class="email-body">${esc(email.body || '')}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+
+  container.classList.remove('hidden');
+}
+
+function byoiCopyAllEmails(btn) {
+  const campaign = (state.byoi.emails?.campaigns || [])[0];
+  if (!campaign) return;
+  const text = (campaign.emails || []).map(e =>
+    `--- Touch ${e.touchNumber} ---\nSubject: ${e.subject}\n\n${e.body}`
+  ).join('\n\n');
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy All 3'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+
+function byoiExportEmails() {
+  const campaigns = state.byoi.emails?.campaigns || [];
+  if (!campaigns.length) { alert('No emails to export.'); return; }
+
+  const rows = [['Signal', 'Company', 'First Name', 'Last Name', 'Title', 'Email', 'Touch', 'Subject', 'Body', 'Tactic']];
+  campaigns.forEach(c => {
+    const contacts = c.contacts?.length ? c.contacts : [{ firstName: '', lastName: '', title: '', email: '' }];
+    (c.emails || []).forEach(e => {
+      contacts.forEach(contact => {
+        rows.push([
+          c.signalTitle, c.company,
+          contact.firstName, contact.lastName, contact.title, contact.email || '',
+          e.touchNumber, e.subject, e.body.replace(/\n/g, ' '), e.tactic || '',
+        ]);
+      });
+    });
+  });
+
+  const csv = rows.map(r => r.map(v => `"${String(v || '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = `byoi_emails_${dateStr()}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+function byoiClear() {
+  state.byoi = {
+    rawText: '', contextCard: null, contextApproved: false,
+    contacts: null, approvedContacts: [], emails: null,
+  };
+  document.getElementById('byoi-text').value = '';
+  document.getElementById('byoi-url').value = '';
+  document.getElementById('byoi-file').value = '';
+  document.getElementById('byoi-input-status').classList.add('hidden');
+  document.getElementById('byoi-interpret-error').classList.add('hidden');
+  document.getElementById('byoi-context-card').classList.add('hidden');
+  document.getElementById('byoi-contacts-section').classList.add('hidden');
+  document.getElementById('byoi-emails-section').classList.add('hidden');
+  document.getElementById('byoi-contacts-error').classList.add('hidden');
+  document.getElementById('byoi-emails-error').classList.add('hidden');
+  document.getElementById('byoi-contacts-approved-banner').classList.add('hidden');
+  document.getElementById('byoi-contacts-approval-footer').classList.add('hidden');
+  const contactsResults = document.getElementById('byoi-contacts-results');
+  contactsResults.classList.add('hidden'); contactsResults.innerHTML = '';
+  const emailsResults = document.getElementById('byoi-emails-results');
+  emailsResults.classList.add('hidden'); emailsResults.innerHTML = '';
+}
+
+// =========================================================================
 // Clipboard utilities
 // =========================================================================
 function copyEmail(btn) {
@@ -1224,9 +1889,10 @@ function clearState() {
     document.getElementById('contacts-approval-footer').classList.add('hidden');
     document.getElementById('contacts-approved-banner').classList.add('hidden');
     document.getElementById('emails-signal-bar').classList.add('hidden');
-    updatePipelineGuard();
+    updateStageGates();
     setHeaderStatus('Idle', 'pending');
     document.getElementById('log-entries').innerHTML = '';
+    byoiClear();
   });
 }
 
@@ -1261,6 +1927,17 @@ async function loadState() {
     if (data.contacts) { state.contacts = data.contacts; renderContacts(data.contacts); setDot('contacts', 'done'); }
     if (data.emails)   { state.emails   = data.emails;   renderEmails(data.emails);     setDot('emails',   'done'); }
 
+    if (data.byoiContacts) {
+      state.byoi.contacts = data.byoiContacts;
+      document.getElementById('byoi-contacts-section').classList.remove('hidden');
+      byoiRenderContacts(data.byoiContacts);
+    }
+    if (data.byoiEmails) {
+      state.byoi.emails = data.byoiEmails;
+      document.getElementById('byoi-emails-section').classList.remove('hidden');
+      byoiRenderEmails(data.byoiEmails);
+    }
+
     if (data.lastRun) {
       setHeaderStatus('Last run: ' + new Date(data.lastRun).toLocaleString(), 'done');
     }
@@ -1276,7 +1953,7 @@ async function loadState() {
   }
 }
 
-updatePipelineGuard();
+updateStageGates();
 loadState();
 </script>
 </body>

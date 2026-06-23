@@ -1100,6 +1100,7 @@ function renderContacts(data) {
               <th>Last Name</th>
               <th>Title</th>
               <th>Email</th>
+              <th>Phone</th>
               <th>Source</th>
               <th>Priority</th>
             </tr>
@@ -1114,10 +1115,14 @@ function renderContacts(data) {
                     onchange="updateContactSelectedCount()" />
                 </td>
                 <td class="text-slate-600">${c.rank}</td>
-                <td class="text-slate-200 font-medium">${esc(c.firstName)}</td>
+                <td class="text-slate-200 font-medium">
+                  ${esc(c.firstName)}
+                  ${c.enrichmentStatus === 'partial' ? '<span class="badge badge-late ml-1" title="Partially enriched — Apollo match added no email/phone; original search data kept">Partial</span>' : ''}
+                </td>
                 <td class="text-slate-200">${esc(c.lastName)}</td>
                 <td class="text-slate-400">${esc(c.title)}</td>
                 <td class="font-mono text-xs text-sky-400">${c.email ? esc(c.email) : '<span class="text-slate-600">—</span>'}</td>
+                <td class="font-mono text-xs text-slate-300">${c.phone ? esc(c.phone) : '<span class="text-slate-600">—</span>'}</td>
                 <td>
                   <span class="badge ${c.source === 'Both' ? 'badge-us' : 'badge-neutral'}">${esc(c.source || 'Unknown')}</span>
                 </td>
@@ -1530,6 +1535,7 @@ function byoiRenderContacts(data) {
               <th>Last Name</th>
               <th>Title</th>
               <th>Email</th>
+              <th>Phone</th>
               <th>Source</th>
               <th>Priority</th>
             </tr>
@@ -1544,10 +1550,14 @@ function byoiRenderContacts(data) {
                     onchange="byoiUpdateContactSelectedCount()" />
                 </td>
                 <td class="text-slate-600">${c.rank}</td>
-                <td class="text-slate-200 font-medium">${esc(c.firstName)}</td>
+                <td class="text-slate-200 font-medium">
+                  ${esc(c.firstName)}
+                  ${c.enrichmentStatus === 'partial' ? '<span class="badge badge-late ml-1" title="Partially enriched — Apollo match added no email/phone; original search data kept">Partial</span>' : ''}
+                </td>
                 <td class="text-slate-200">${esc(c.lastName)}</td>
                 <td class="text-slate-400">${esc(c.title)}</td>
                 <td class="font-mono text-xs text-sky-400">${c.email ? esc(c.email) : '<span class="text-slate-600">—</span>'}</td>
+                <td class="font-mono text-xs text-slate-300">${c.phone ? esc(c.phone) : '<span class="text-slate-600">—</span>'}</td>
                 <td>
                   <span class="badge ${c.source === 'Both' ? 'badge-us' : 'badge-neutral'}">${esc(c.source || 'Unknown')}</span>
                 </td>

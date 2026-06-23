@@ -265,7 +265,7 @@ async def execute_hubspot_search(params: dict) -> dict:
 
 
 async def execute_apollo_people_search(params: dict) -> dict:
-    """Call Apollo.io people search API."""
+    """Call Apollo.io people search, then enrich each result via people/match."""
     url = "https://api.apollo.io/api/v1/mixed_people/api_search"
     headers = {
         "x-api-key":    APOLLO_API_KEY,
@@ -283,7 +283,118 @@ async def execute_apollo_people_search(params: dict) -> dict:
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(url, json=payload, headers=headers)
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+
+    # Second pass: enrich each returned person via the people/match endpoint.
+    people = data.get("people")
+    if isinstance(people, list) and people:
+        data["people"] = await _enrich_apollo_people(people)
+    return data
+
+
+# Apollo people/match — enrichment endpoint. Bounded concurrency so a large
+# search page doesn't fan out into dozens of simultaneous calls.
+APOLLO_MATCH_URL = "https://api.apollo.io/api/v1/people/match"
+APOLLO_ENRICH_CONCURRENCY = 5
+
+
+def _is_real_email(email: Any) -> bool:
+    """True if `email` is a usable address, not blank or an Apollo lock placeholder."""
+    if not isinstance(email, str):
+        return False
+    e = email.strip().lower()
+    if not e or "@" not in e:
+        return False
+    # Apollo returns placeholders like 'email_not_unlocked@domain.com' when locked
+    return "not_unlocked" not in e and "email_not_found" not in e
+
+
+def _pick_match_phone(person: dict) -> str | None:
+    """Pull a mobile/direct phone from an Apollo person/match record."""
+    numbers = person.get("phone_numbers") or []
+    # Prefer mobile / direct-dial numbers over switchboard/HQ lines
+    for want in ("mobile", "direct", "work_direct"):
+        for n in numbers:
+            if isinstance(n, dict) and (n.get("type") or "").lower() == want:
+                num = n.get("sanitized_number") or n.get("raw_number")
+                if num:
+                    return num
+    # Fall back to any number on the record, then explicit fields
+    for n in numbers:
+        if isinstance(n, dict):
+            num = n.get("sanitized_number") or n.get("raw_number")
+            if num:
+                return num
+    return person.get("mobile_phone") or person.get("direct_phone")
+
+
+async def _apollo_match_person(client: httpx.AsyncClient, person: dict) -> dict:
+    """Enrich one Apollo search result via people/match.
+
+    Merges full name, email and mobile/direct phone into `person` and sets
+    `enrichment_status` to "enriched" (match added data) or "partial" (the call
+    failed or returned nothing new — the original search fields are kept).
+    """
+    if not isinstance(person, dict):
+        return person
+
+    org = person.get("organization") or {}
+    org_name = person.get("organization_name") or org.get("name") or ""
+    headers = {"x-api-key": APOLLO_API_KEY, "Content-Type": "application/json"}
+    payload = {
+        "api_key":                APOLLO_API_KEY,
+        "first_name":             person.get("first_name", ""),
+        "last_name":              person.get("last_name", ""),
+        "organization_name":      org_name,
+        "title":                  person.get("title", ""),
+        "reveal_personal_emails": True,
+    }
+
+    try:
+        resp = await client.post(APOLLO_MATCH_URL, json=payload, headers=headers)
+        resp.raise_for_status()
+        matched = (resp.json() or {}).get("person") or {}
+    except Exception as e:
+        log.warning(
+            "Apollo enrich failed for %s %s: %s",
+            person.get("first_name", ""), person.get("last_name", ""), e,
+        )
+        person["enrichment_status"] = "partial"
+        return person
+
+    added = False
+
+    full_name = matched.get("name") or " ".join(
+        x for x in (matched.get("first_name"), matched.get("last_name")) if x
+    ).strip()
+    if full_name and full_name != person.get("name"):
+        person["name"] = full_name
+        added = True
+
+    match_email = matched.get("email")
+    if _is_real_email(match_email) and not _is_real_email(person.get("email")):
+        person["email"] = match_email
+        added = True
+
+    match_phone = _pick_match_phone(matched)
+    if match_phone and not person.get("phone"):
+        person["phone"] = match_phone
+        added = True
+
+    person["enrichment_status"] = "enriched" if added else "partial"
+    return person
+
+
+async def _enrich_apollo_people(people: list[dict]) -> list[dict]:
+    """Enrich each Apollo search result concurrently via people/match."""
+    sem = asyncio.Semaphore(APOLLO_ENRICH_CONCURRENCY)
+
+    async def _one(client: httpx.AsyncClient, person: dict) -> dict:
+        async with sem:
+            return await _apollo_match_person(client, person)
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        return await asyncio.gather(*[_one(client, p) for p in people])
 
 
 async def dispatch_tool(name: str, params: dict) -> str:

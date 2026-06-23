@@ -157,7 +157,7 @@ Return a valid JSON object with this exact structure:
   ]
 }
 
-For each signal, return the top 5 contacts by rank. Return ONLY the JSON, no markdown.
+For each signal, return the top 10 contacts by rank. Return ONLY the JSON, no markdown.
 """.strip()
 
 

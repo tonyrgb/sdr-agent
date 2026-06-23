@@ -676,7 +676,7 @@ async def run_contacts_stage(
 
     user_message = (
         "Source contacts for these signals. For EACH signal, search both HubSpot and Apollo "
-        "for contacts at the company. Deduplicate, rank, and return the top 5 per signal.\n\n"
+        "for contacts at the company. Deduplicate, rank, and return the top 10 per signal.\n\n"
         "Signals:\n" + json.dumps(signal_list, indent=2)
     )
 

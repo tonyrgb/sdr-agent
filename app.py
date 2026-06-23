@@ -637,7 +637,7 @@ async def run_contacts_stage(
     state_key: str = "contacts",
     stage_label: str = "contacts",
 ) -> dict:
-    """Tab 2: Coordinator — source and rank contacts per signal.
+    """Tab 2: Greeter — source and rank contacts per signal.
 
     state_key/stage_label let callers (e.g. the BYOI tab) reuse this runner
     against a separate pipeline_state slot and SSE stage name, without

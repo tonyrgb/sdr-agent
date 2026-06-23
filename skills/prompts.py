@@ -114,7 +114,7 @@ Use apollo_mixed_people_api_search with the company name as the organization fil
 Apollo results are automatically enriched via the people/match endpoint before they reach you: each person may carry an enriched full name, email, phone, and an `enrichment_status` field of "enriched" (match added contact data) or "partial" (enrichment failed or added nothing new — only the original search fields are present). Carry this status through to your output (see enrichmentStatus below) so the UI can flag partially enriched contacts. Use the enriched email and phone when present.
 Target these high-value roles for Oil & Gas / Energy:
 - GIS Manager, GIS Director, Manager of GIS, Senior GIS Manager
-- Engineering Manager, Director of Engineering, VP Engineering, Chief Engineer
+- Engineering Manager, Director of Engineering, VP Engineering, Vice President Engineering, Chief Engineer, Manager Project Engineering
 - Capital Projects Manager, Director of Capital Projects
 - Operations Manager, Director of Operations, VP of Operations
 - Compliance Manager, Director of Compliance
